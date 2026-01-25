@@ -10,3 +10,4 @@ tradingview-screener
 markitdown
 openai
 pdfplumber
+websocket-client
