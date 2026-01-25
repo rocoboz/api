@@ -3,8 +3,44 @@ import asyncio
 import sys
 import os
 
-# Add local borsapy_lib to path to use the latest version
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'borsapy_lib')))
+# --- PATH SETUP & DEBUGGING ---
+# Determine absolute paths
+base_dir = os.path.dirname(os.path.abspath(__file__))
+lib_dir_name = 'borsapy_lib'
+lib_path = os.path.join(base_dir, lib_dir_name)
+
+print("--- DEBUG START ---")
+print(f"Current Working Directory: {os.getcwd()}")
+print(f"Script Directory: {base_dir}")
+print(f"Library Path: {lib_path}")
+
+# Check library directory
+if os.path.exists(lib_path):
+    print(f"Library directory exists: {lib_path}")
+    try:
+        contents = os.listdir(lib_path)
+        print(f"Contents of {lib_dir_name}: {contents}")
+        
+        # Check for inner borsapy package
+        borsapy_inner = os.path.join(lib_path, 'borsapy')
+        if os.path.exists(borsapy_inner):
+            print(f"Found 'borsapy' package folder: {borsapy_inner}")
+            try:
+                print(f"Contents of borsapy package: {os.listdir(borsapy_inner)}")
+            except Exception as e:
+                print(f"Error listing borsapy package contents: {e}")
+        else:
+            print(f"WARNING: 'borsapy' folder not found inside {lib_path}")
+            
+    except Exception as e:
+        print(f"Error listing directory contents: {e}")
+else:
+    print(f"CRITICAL ERROR: Library path does not exist: {lib_path}")
+
+# Add to sys.path
+sys.path.insert(0, lib_path)
+print(f"sys.path[0]: {sys.path[0]}")
+print("--- DEBUG END ---")
 
 from typing import List, Optional, Dict, Any, Union
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -14,9 +50,14 @@ import pandas as pd
 import numpy as np
 
 # Borsapy imports
-from borsapy import Ticker, FX, Crypto, Fund, Index, Bond, Eurobond
-from borsapy import market, technical
-from borsapy.stream import TradingViewStream
+try:
+    from borsapy import Ticker, FX, Crypto, Fund, Index, Bond, Eurobond
+    from borsapy import market, technical
+    from borsapy.stream import TradingViewStream
+    print("SUCCESS: borsapy imported successfully.")
+except ImportError as e:
+    print(f"IMPORT ERROR: {e}")
+    raise e
 
 app = FastAPI(
     title="BorsaPy API",

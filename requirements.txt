@@ -10,10 +10,3 @@ tradingview-screener
 markitdown
 openai
 pdfplumber
-# borsapy is installed from git in main.py logic for local dev, 
-# but for Render we might need to rely on PyPI version OR tell user to include the repo.
-# Since the user is uploading files to Render/GitHub, they should upload the `borsapy_repo` content OR use PyPI.
-# If they use PyPI, they get the old version without 'stream'.
-# The user wants "Professional API" which implies the latest features.
-# I will instruct the user to COPY the `borsapy` folder into their repo, 
-# because `pip install borsapy` gives an old version.
