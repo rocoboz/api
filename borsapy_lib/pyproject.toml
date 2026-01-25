@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "borsapy"
+version = "0.6.2"
+description = "Turkish financial markets data library - yfinance-like API for BIST stocks, forex, crypto, and more"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Said Surucu" }
+]
+keywords = [
+    "finance",
+    "stocks",
+    "bist",
+    "turkey",
+    "forex",
+    "crypto",
+    "market-data",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "pandas>=2.0.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "pydantic>=2.0.0",
+    "openpyxl>=3.1.0",
+    "urllib3>=2.0.0",
+    "websocket-client>=1.9.0",
+    "pdfplumber>=0.11.8",
+    "openai>=2.15.0",
+    "tradingview-screener>=3.0.0",
+    "markitdown",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+holdings = [
+    "pdfplumber>=0.10.0",
+]
+all = [
+    "pdfplumber>=0.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/saidsurucu/borsapy"
+Documentation = "https://github.com/saidsurucu/borsapy#readme"
+Repository = "https://github.com/saidsurucu/borsapy"
+Issues = "https://github.com/saidsurucu/borsapy/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["borsapy"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pdoc>=15.0.4",
+    "pytest>=8.4.2",
+]

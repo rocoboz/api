@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+CLAUDE.md
+uv.lock
+
+# IDE/Editor
+.DS_Store
+.serena/
+
+# Test files with credentials
+test_realtime.py
+
+# Internal docs
+docs/colendi_integration_plan.md
+docs/alert_system_plan.md
