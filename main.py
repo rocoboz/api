@@ -35,7 +35,7 @@ import numpy as np
 # Borsapy imports
 try:
     from borsapy import Ticker, FX, Crypto, Fund, Index, Bond, Eurobond
-    from borsapy import market, technical
+    from borsapy import market, technical, screener
     from borsapy.stream import TradingViewStream
 except ImportError as e:
     print(f"IMPORT ERROR: {e}")
@@ -65,7 +65,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="BorsaPy API",
     description="Professional Financial Data API for Mobile & Web",
-    version="1.0.3"
+    version="1.0.4"
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -179,7 +179,7 @@ def home(request: Request):
     return {
         "status": "online",
         "service": "BorsaPy API Mobile",
-        "version": "1.0.3",
+        "version": "1.0.4",
         "security": "Rate Limited & API Key Ready"
     }
 
@@ -236,6 +236,51 @@ def get_stock_financials(request: Request, symbol: str, type: str = "balance", a
             elif type == "cashflow": return df_to_json(tk.get_cashflow())
             return []
         return get_long_cached_data(cache_key, fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 1.1 Screener (All Market Data) ---
+
+@app.get("/market/screener")
+@limiter.limit("5/minute") # Extremely heavy endpoint
+def get_market_screener(request: Request, authorized: bool = Depends(verify_api_key)):
+    """
+    Returns data for ALL stocks in BIST.
+    Includes Price, Change%, Volume, Market Cap.
+    """
+    try:
+        def fetch():
+            # Using borsapy screener to fetch all stocks with price > 0
+            # This returns a list of dictionaries directly
+            s = screener.Screener()
+            # Default filter: Price > 0 (gets everything)
+            s.add_filter("price", min=0.01)
+            df = s.run()
+            
+            # Select relevant columns and rename for frontend clarity
+            # 'criteria_price', 'criteria_return_1d', 'criteria_volume_3m', 'name', 'symbol'
+            # Note: Column names depend on what the screener provider returns
+            
+            # Map known columns to simpler keys
+            # Based on isyatirim_screener.py mapping:
+            # price -> 7, return_1d -> 21, volume_3m -> 26
+            
+            final_data = []
+            for _, row in df.iterrows():
+                item = {
+                    "symbol": row.get("symbol"),
+                    "name": row.get("name"),
+                    "price": row.get("criteria_7", row.get("criteria_price", 0)), # Fallback keys
+                    "change_1d": row.get("criteria_21", row.get("criteria_return_1d", 0)),
+                    "volume": row.get("criteria_26", row.get("criteria_volume_3m", 0)), # Volume is in Million USD usually
+                }
+                final_data.append(item)
+            
+            return final_data
+
+        # Cache for 5 minutes since it's heavy
+        return get_long_cached_data("MARKET_SCREENER_ALL", fetch)
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
