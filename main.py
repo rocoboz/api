@@ -2,6 +2,9 @@ import json
 import asyncio
 import sys
 import os
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from typing import List, Optional, Dict, Any, Union
 
 # --- PATH SETUP & DEBUGGING ---
 # Determine absolute paths
@@ -42,7 +45,6 @@ sys.path.insert(0, lib_path)
 print(f"sys.path[0]: {sys.path[0]}")
 print("--- DEBUG END ---")
 
-from typing import List, Optional, Dict, Any, Union
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -62,7 +64,7 @@ except ImportError as e:
 app = FastAPI(
     title="BorsaPy API",
     description="Professional Financial Data API for BIST, Forex, Crypto and Funds",
-    version="1.0.0"
+    version="1.0.2"
 )
 
 # CORS Configuration
@@ -73,6 +75,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- CACHING SYSTEM ---
+
+FUND_CACHE = {} # {code: {'data': ..., 'timestamp': datetime}}
+STOCK_CACHE = {} # {symbol: {'data': ..., 'timestamp': datetime}}
+
+def get_turkey_time():
+    return datetime.now(ZoneInfo("Europe/Istanbul"))
+
+def get_cached_fund_data(code: str, fetch_func):
+    """
+    Dynamic caching for funds based on TEFAS update hours.
+    Updates usually happen on weekdays between 10:00 and 14:00.
+    """
+    now = get_turkey_time()
+    
+    # Check if it's a weekday (0=Monday, 4=Friday)
+    is_weekday = now.weekday() < 5
+    current_hour = now.hour
+    
+    # Logic:
+    # If it's a Weekday AND between 10:00 and 15:00 (Hot Zone) -> Short Cache (15 mins)
+    # Otherwise (Weekends or Evenings) -> Long Cache (4 hours)
+    
+    if is_weekday and 10 <= current_hour <= 14:
+        # High frequency update window (10, 11, 12, 13, 14 hours)
+        ttl_seconds = 900 # 15 minutes
+        cache_mode = "HOT (15m)"
+    else:
+        # Market closed / No updates expected
+        ttl_seconds = 14400 # 4 hours
+        cache_mode = "COLD (4h)"
+        
+    # Check Cache
+    if code in FUND_CACHE:
+        entry = FUND_CACHE[code]
+        age = (now - entry['timestamp']).total_seconds()
+        
+        if age < ttl_seconds:
+            # print(f"CACHE HIT (Fund): {code} | Age: {age:.0f}s | Mode: {cache_mode}")
+            return entry['data']
+    
+    # Refetch
+    print(f"CACHE MISS (Fund): {code} | Mode: {cache_mode} - Refetching...")
+    data = fetch_func()
+    FUND_CACHE[code] = {'data': data, 'timestamp': now}
+    return data
+
+def get_cached_stock_data(symbol: str, fetch_func, ttl_seconds=60):
+    """
+    Simple TTL cache for stocks (high volatility).
+    Default 60 seconds to prevent abuse but allow near-realtime.
+    """
+    now = get_turkey_time()
+    
+    if symbol in STOCK_CACHE:
+        entry = STOCK_CACHE[symbol]
+        if (now - entry['timestamp']).total_seconds() < ttl_seconds:
+            # print(f"CACHE HIT (Stock): {symbol}")
+            return entry['data']
+
+    # Refetch
+    print(f"CACHE MISS (Stock): {symbol} - Refetching...")
+    data = fetch_func()
+    STOCK_CACHE[symbol] = {'data': data, 'timestamp': now}
+    return data
 
 # --- Helper Functions ---
 
@@ -105,7 +173,7 @@ def home():
     return {
         "status": "online",
         "service": "BorsaPy API",
-        "version": "1.0.0",
+        "version": "1.0.2",
         "endpoints": {
             "stocks": "/stocks/list",
             "stock_detail": "/stocks/{symbol}",
@@ -126,8 +194,12 @@ def get_stock_list():
     """Returns a list of all BIST companies."""
     try:
         # Assuming market.companies() returns a DataFrame
-        df = market.companies()
-        return df_to_json(df)
+        # Cache list for 1 hour as it rarely changes
+        def fetch():
+            return df_to_json(market.companies())
+            
+        # Unique key for list
+        return get_cached_stock_data("ALL_STOCKS_LIST", fetch, ttl_seconds=3600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -135,16 +207,17 @@ def get_stock_list():
 def get_stock_detail(symbol: str):
     """Get stock summary, price, and basic info."""
     try:
-        tk = Ticker(symbol)
-        # Using fast_info for speed if available, else info
-        info = tk.fast_info if hasattr(tk, 'fast_info') else {}
-        if not info:
-             info = tk.info if hasattr(tk, 'info') else {}
-             
-        return {
-            "symbol": symbol.upper(),
-            "data": info
-        }
+        def fetch():
+            tk = Ticker(symbol)
+            info = tk.fast_info if hasattr(tk, 'fast_info') else {}
+            if not info:
+                 info = tk.info if hasattr(tk, 'info') else {}
+            return {
+                "symbol": symbol.upper(),
+                "data": info
+            }
+            
+        return get_cached_stock_data(f"{symbol}_DETAIL", fetch, ttl_seconds=60)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Stock not found or error: {str(e)}")
 
@@ -156,9 +229,15 @@ def get_stock_history(
 ):
     """Get historical OHLCV data."""
     try:
-        tk = Ticker(symbol)
-        df = tk.history(period=period, interval=interval)
-        return df_to_json(df)
+        # Cache key depends on args
+        cache_key = f"{symbol}_HIST_{period}_{interval}"
+        
+        def fetch():
+            tk = Ticker(symbol)
+            df = tk.history(period=period, interval=interval)
+            return df_to_json(df)
+            
+        return get_cached_stock_data(cache_key, fetch, ttl_seconds=60)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -166,16 +245,21 @@ def get_stock_history(
 def get_stock_financials(symbol: str, type: str = Query("balance", enum=["balance", "income", "cashflow"])):
     """Get financial statements."""
     try:
-        tk = Ticker(symbol)
-        df = None
-        if type == "balance":
-            df = tk.get_balance_sheet()
-        elif type == "income":
-            df = tk.get_income_stmt() # Adjust method name if needed based on borsapy version
-        elif type == "cashflow":
-            df = tk.get_cashflow() # Adjust method name if needed
+        # Financials update quarterly, cache for 24 hours
+        cache_key = f"{symbol}_FIN_{type}"
+        
+        def fetch():
+            tk = Ticker(symbol)
+            df = None
+            if type == "balance":
+                df = tk.get_balance_sheet()
+            elif type == "income":
+                df = tk.get_income_stmt()
+            elif type == "cashflow":
+                df = tk.get_cashflow()
+            return df_to_json(df)
             
-        return df_to_json(df)
+        return get_cached_stock_data(cache_key, fetch, ttl_seconds=86400)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -185,14 +269,13 @@ def get_stock_financials(symbol: str, type: str = Query("balance", enum=["balanc
 def get_fund_detail(code: str):
     """Get TEFAS fund details."""
     try:
-        f = Fund(code)
-        # Fund object usually has attributes or a method to get data
-        # Inspecting borsapy source implies it might load data on init or via methods
-        # We will try to return the dictionary representation of public attributes
-        data = {k: v for k, v in f.__dict__.items() if not k.startswith('_')}
-        
-        # If there's a specific 'history' method or similar, we might want separate endpoint
-        return {"code": code.upper(), "data": data}
+        def fetch():
+            f = Fund(code)
+            data = {k: v for k, v in f.__dict__.items() if not k.startswith('_')}
+            return {"code": code.upper(), "data": data}
+            
+        # Use Smart Fund Caching
+        return get_cached_fund_data(f"{code}_DETAIL", fetch)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -200,10 +283,14 @@ def get_fund_detail(code: str):
 def get_fund_history(code: str):
     """Get TEFAS fund historical price."""
     try:
-        f = Fund(code)
-        if hasattr(f, 'history'):
-             return df_to_json(f.history())
-        return {"error": "History not available for this fund type"}
+        def fetch():
+            f = Fund(code)
+            if hasattr(f, 'history'):
+                 return df_to_json(f.history())
+            return {"error": "History not available for this fund type"}
+            
+        # Use Smart Fund Caching
+        return get_cached_fund_data(f"{code}_HIST", fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -212,6 +299,7 @@ def get_fund_history(code: str):
 @app.get("/fx/list")
 def get_fx_list():
     """List common FX and commodities."""
+    # Static list, infinite cache technically fine, but let's keep it simple
     return [
         {"symbol": "USD", "name": "US Dollar"},
         {"symbol": "EUR", "name": "Euro"},
@@ -224,13 +312,15 @@ def get_fx_list():
 def get_fx_detail(symbol: str):
     """Get FX rates (including bank rates)."""
     try:
-        fx = FX(symbol)
-        # Assuming .current or .bank_rates property
-        data = {}
-        if hasattr(fx, 'bank_rates'):
-             data['bank_rates'] = df_to_json(fx.bank_rates)
-        
-        return {"symbol": symbol, "data": data}
+        def fetch():
+            fx = FX(symbol)
+            data = {}
+            if hasattr(fx, 'bank_rates'):
+                 data['bank_rates'] = df_to_json(fx.bank_rates)
+            return {"symbol": symbol, "data": data}
+            
+        # FX rates update frequently, cache for 5 mins
+        return get_cached_stock_data(f"FX_{symbol}", fetch, ttl_seconds=300)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
         
@@ -240,12 +330,16 @@ def get_fx_detail(symbol: str):
 def get_index_detail(symbol: str):
     """Get Market Index details (e.g. XU100)."""
     try:
-        idx = Index(symbol)
-        df = idx.history(period="1mo")
-        return {
-            "symbol": symbol,
-            "history": df_to_json(df)
-        }
+        def fetch():
+            idx = Index(symbol)
+            df = idx.history(period="1mo")
+            return {
+                "symbol": symbol,
+                "history": df_to_json(df)
+            }
+        
+        # Indices are live like stocks
+        return get_cached_stock_data(f"IDX_{symbol}", fetch, ttl_seconds=60)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -253,13 +347,16 @@ def get_index_detail(symbol: str):
 def get_bond_detail(name: str):
     """Get Bond/Eurobond details."""
     try:
-        # Try Bond first, then Eurobond
-        try:
-            b = Bond(name)
-            return {"name": name, "type": "Bond", "data": df_to_json(b.history())}
-        except:
-            eb = Eurobond(name)
-            return {"name": name, "type": "Eurobond", "data": df_to_json(eb.history())}
+        def fetch():
+            try:
+                b = Bond(name)
+                return {"name": name, "type": "Bond", "data": df_to_json(b.history())}
+            except:
+                eb = Eurobond(name)
+                return {"name": name, "type": "Eurobond", "data": df_to_json(eb.history())}
+                
+        # Bonds trade daily usually, cache for 4 hours
+        return get_cached_stock_data(f"BOND_{name}", fetch, ttl_seconds=14400)
     except Exception as e:
         raise HTTPException(status_code=404, detail="Bond/Eurobond not found")
 
@@ -268,8 +365,7 @@ def get_bond_detail(name: str):
 @app.get("/crypto/{symbol}")
 def get_crypto_detail(symbol: str):
     try:
-        c = Crypto(symbol)
-        # Implementation depends on borsapy Crypto class structure
+        # Placeholder
         return {"symbol": symbol, "data": "Not fully implemented yet (check borsapy docs)"}
     except Exception as e:
          raise HTTPException(status_code=404, detail=str(e))
@@ -280,33 +376,38 @@ def get_crypto_detail(symbol: str):
 def get_analysis(symbol: str):
     """Perform technical analysis on the symbol."""
     try:
-        tk = Ticker(symbol)
-        df = tk.history(period="1y")
-        
-        if df.empty:
-            return {"error": "No data for analysis"}
+        # Analysis is heavy, cache it for 2 minutes
+        def fetch():
+            tk = Ticker(symbol)
+            df = tk.history(period="1y")
+            
+            if df.empty:
+                return {"error": "No data for analysis"}
 
-        ta = technical.TechnicalAnalyzer(df)
-        
-        # Calculate indicators
-        rsi = ta.calculate_rsi().iloc[-1] if hasattr(ta, 'calculate_rsi') else None
-        sma_50 = ta.calculate_sma(period=50).iloc[-1] if hasattr(ta, 'calculate_sma') else None
-        sma_200 = ta.calculate_sma(period=200).iloc[-1] if hasattr(ta, 'calculate_sma') else None
-        
-        macd_data = ta.calculate_macd() if hasattr(ta, 'calculate_macd') else pd.DataFrame()
-        macd = macd_data.iloc[-1].to_dict() if not macd_data.empty else {}
+            ta = technical.TechnicalAnalyzer(df)
+            
+            # Calculate indicators
+            rsi = ta.calculate_rsi().iloc[-1] if hasattr(ta, 'calculate_rsi') else None
+            sma_50 = ta.calculate_sma(period=50).iloc[-1] if hasattr(ta, 'calculate_sma') else None
+            sma_200 = ta.calculate_sma(period=200).iloc[-1] if hasattr(ta, 'calculate_sma') else None
+            
+            macd_data = ta.calculate_macd() if hasattr(ta, 'calculate_macd') else pd.DataFrame()
+            macd = macd_data.iloc[-1].to_dict() if not macd_data.empty else {}
 
-        return {
-            "symbol": symbol,
-            "last_price": df["Close"].iloc[-1],
-            "indicators": {
-                "RSI": round(rsi, 2) if rsi else None,
-                "SMA_50": round(sma_50, 2) if sma_50 else None,
-                "SMA_200": round(sma_200, 2) if sma_200 else None,
-                "MACD": macd
-            },
-            "signal": "BUY" if rsi and rsi < 30 else ("SELL" if rsi and rsi > 70 else "NEUTRAL")
-        }
+            return {
+                "symbol": symbol,
+                "last_price": df["Close"].iloc[-1],
+                "indicators": {
+                    "RSI": round(rsi, 2) if rsi else None,
+                    "SMA_50": round(sma_50, 2) if sma_50 else None,
+                    "SMA_200": round(sma_200, 2) if sma_200 else None,
+                    "MACD": macd
+                },
+                "signal": "BUY" if rsi and rsi < 30 else ("SELL" if rsi and rsi > 70 else "NEUTRAL")
+            }
+            
+        return get_cached_stock_data(f"ANALYSIS_{symbol}", fetch, ttl_seconds=120)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -314,8 +415,8 @@ def get_analysis(symbol: str):
 def search(q: str):
     """Search for companies or tickers."""
     try:
-        res = market.search_companies(q)
-        return df_to_json(res)
+        # Search results don't change often, cache for 1 hour
+        return get_cached_stock_data(f"SEARCH_{q}", lambda: df_to_json(market.search_companies(q)), ttl_seconds=3600)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
