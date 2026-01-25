@@ -11,3 +11,5 @@ markitdown
 openai
 pdfplumber
 websocket-client
+slowapi
+cachetools
