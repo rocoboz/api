@@ -27,14 +27,20 @@ Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (S
 
 | Metod | Uç Nokta (Endpoint) | Açıklama |
 | :--- | :--- | :--- |
+| `GET` | `/` | Servis durumunu ve versiyon bilgisini döner. |
 | `GET` | `/stocks/list` | Tüm BIST şirketlerinin listesini getirir. |
 | `GET` | `/stocks/{symbol}` | Hisse özet bilgileri (Fiyat, FK, PD/DD, Piyasa Değeri). |
-| `GET` | `/stocks/{symbol}/history` | Grafik çizimi için tarihsel OHLCV verileri. |
-| `GET` | `/stocks/{symbol}/financials` | Şirketin mali tabloları (Bilanço/Gelir). |
-| `GET` | `/analysis/{symbol}` | Otomatik teknik analiz ve indikatör değerleri. |
+| `GET` | `/stocks/{symbol}/history` | Tarihsel OHLCV verileri. (`period` ve `interval` parametreleri alabilir). |
+| `GET` | `/stocks/{symbol}/financials` | Şirketin mali tabloları (`type`: `balance`, `income`, `cashflow`). |
+| `GET` | `/market/screener` | Tüm hisselerin anlık piyasa verileri (Fiyat, Değişim, Hacim). |
+| `GET` | `/market/index/{symbol}` | Endeks (Örn: `XU100`, `XU030`) tarihsel verileri. |
+| `GET` | `/analysis/{symbol}` | Otomatik teknik analiz ve indikatör değerleri (RSI, SMA). |
 | `GET` | `/fx/list` | Takip edilen döviz ve emtiaların listesi. |
-| `GET` | `/fx/{symbol}` | Banka ve serbest piyasa kurları (Örn: `USD`, `gram-altin`). |
+| `GET` | `/fx/{symbol}` | Banka ve serbest piyasa kurları (Örn: `USD`, `EUR`, `gram-altin`). |
 | `GET` | `/funds/{code}` | TEFAS fon detayları (Örn: `AFT`, `TCD`). |
+| `GET` | `/funds/{code}/history` | Fonların tarihsel fiyat değişim verileri. |
+| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond verileri. |
+| `GET` | `/search?q={query}` | Hisse kodu veya şirket adına göre arama yapar. |
 
 ---
 
