@@ -20,7 +20,7 @@ class BaseProvider:
         self,
         timeout: float = 30.0,
         cache: Cache | None = None,
-        verify: bool = True,
+        verify: bool = False,
     ):
         """
         Initialize the provider.

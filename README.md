@@ -40,7 +40,7 @@ Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (S
 | `GET` | `/crypto/{symbol}` | Seçili Kripto paranın (Örn: `BTCUSDT`) değerleri. |
 | `GET` | `/funds/{code}` | TEFAS fon detayları (Örn: `AFT`, `TCD`). |
 | `GET` | `/funds/{code}/history` | Fonların tarihsel fiyat değişim verileri. |
-| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond piyasa verileri. |
+| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond piyasa verileri (Örn: `10Y`, `US900123CJ75`). |
 | `GET` | `/market/economy/calendar` | Bugünkü güncel veya yaklaşan önemli ekonomik etkinlikler. |
 | `GET` | `/search?q={query}` | Hisse kodu veya şirket adına göre arama yapar. |
 
