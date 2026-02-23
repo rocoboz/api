@@ -125,8 +125,7 @@ def get_cached_fund_data(code: str, fetch_func):
     is_weekday = now.weekday() < 5
     current_hour = now.hour
     
-    # Logic: Weekday & 10-15h -> 15 min TTL, Else -> 4 hour TTL
-    if is_weekday and 10 <= current_hour <= 15:
+    if is_weekday and 8 <= current_hour <= 15:
         ttl_seconds = 900 
         cache_mode = "HOT (15m)"
     else:
