@@ -300,8 +300,8 @@ def get_market_screener(request: Request, authorized: bool = Depends(verify_api_
             
             return final_data
 
-        # Cache for 5 minutes since it's heavy
-        return get_long_cached_data("MARKET_SCREENER_ALL", fetch)
+        # Cache for 60 seconds (relies on borsapy internal cache as well)
+        return get_cached_stock_data("MARKET_SCREENER_ALL", fetch)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
