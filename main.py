@@ -31,11 +31,12 @@ from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 import pandas as pd
 import numpy as np
+import httpx
 
 # Borsapy imports
 try:
     from borsapy import Ticker, FX, Crypto, Fund, Index, Bond, Eurobond
-    from borsapy import market, technical, screener
+    from borsapy import market, technical, screener, crypto_pairs, EconomicCalendar
     from borsapy.stream import TradingViewStream
 except ImportError as e:
     print(f"IMPORT ERROR: {e}")
@@ -78,6 +79,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def start_keep_alive():
+    async def ping_regularly():
+        # Render external URL is provided in the environment by Render itself
+        url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000") 
+        if url == "http://localhost:8000" and "RENDER" not in os.environ:
+             return # Don't self-ping in local development unless explicitly asked
+        
+        while True:
+            await asyncio.sleep(14 * 60) # Ping every 14 mins to prevent Render from sleeping
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.get(url, timeout=5.0)
+            except Exception as e:
+                print(f"Keep-alive ping failed: {e}")
+                
+    asyncio.create_task(ping_regularly())
 
 # --- CACHING SYSTEM (MEMORY SAFE) ---
 
@@ -364,7 +383,36 @@ def get_bond_detail(request: Request, name: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail="Bond not found")
 
-# --- 4. Analysis & Search ---
+# --- 4. Crypto & Economic Calendar ---
+
+@app.get("/crypto/list")
+@limiter.limit("60/minute")
+def get_crypto_list(request: Request):
+    return crypto_pairs()
+
+@app.get("/crypto/{symbol}")
+@limiter.limit("60/minute")
+def get_crypto_detail(request: Request, symbol: str):
+    try:
+        def fetch():
+            c = Crypto(symbol)
+            return {"symbol": symbol, "data": c.info}
+        return get_cached_stock_data(f"CRYPTO_{symbol}", fetch)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Crypto not found")
+
+@app.get("/market/economy/calendar")
+@limiter.limit("30/minute")
+def get_economic_calendar(request: Request):
+    try:
+        def fetch():
+            cal = EconomicCalendar()
+            return df_to_json(cal.today())
+        return get_long_cached_data("ECONOMIC_CALENDAR_TODAY", fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 5. Analysis & Search ---
 
 @app.get("/analysis/{symbol}")
 @limiter.limit("15/minute") # Very heavy endpoint, strict limit

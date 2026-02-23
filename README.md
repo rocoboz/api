@@ -12,12 +12,12 @@ Bu proje, güçlü [borsapy](https://github.com/saidsurucu/borsapy) kütüphanes
 
 ## 🚀 Özellikler
 
-*   **⚡ Anlık Piyasa Verileri:** BIST hisseleri için 15 dakika gecikmeli fiyat, hacim ve değişim verileri.
-*   **🏦 Banka Kurları:** 20+ Türk bankasının (Akbank, İş, Garanti vb.) canlı Döviz ve Altın alış/satış kurları.
-*   **📊 Teknik Analiz Motoru:** Sunucu tarafında hesaplanan RSI, MACD, SMA, Bollinger Bantları ve Al/Sat sinyalleri.
-*   **📑 Mali Tablolar:** Şirketlerin detaylı Bilanço, Gelir Tablosu ve Nakit Akış tabloları.
-*   **💰 Yatırım Fonları:** TEFAS üzerindeki tüm fonların detaylı analiz verileri.
-*   **🔍 Akıllı Arama:** Hisseleri ve şirketleri isme veya koda göre bulan gelişmiş arama motoru.
+*   **⚡ Anlık Piyasa Verileri:** BIST hisseleri için gecikmesiz/gecikmeli fiyat, hacim ve değişim verileri.
+*   **🏦 Banka Kurları:** 20+ Türk bankasının canlı Döviz ve Altın alış/satış kurları.
+*   **📊 Teknik Analiz:** Sunucu tarafında hesaplanan RSI, MACD, SMA gibi değerler ve indikatör sinyalleri.
+*   **💰 Kripto Para & Fonlar:** Kripto paraların (Binance/BTCTurk) ve TEFAS üzerindeki fonların detaylı verileri.
+*   **📅 Ekonomik Takvim & Enflasyon:** Günlük ekonomik olaylar takvimi.
+*   **📡 Kesintisiz (Keep-Alive):** Render üzerinde uykuyu engelleyen otomatik self-ping altyapısı mevcuttur.
 
 ---
 
@@ -27,7 +27,6 @@ Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (S
 
 | Metod | Uç Nokta (Endpoint) | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/` | Servis durumunu ve versiyon bilgisini döner. |
 | `GET` | `/stocks/list` | Tüm BIST şirketlerinin listesini getirir. |
 | `GET` | `/stocks/{symbol}` | Hisse özet bilgileri (Fiyat, FK, PD/DD, Piyasa Değeri). |
 | `GET` | `/stocks/{symbol}/history` | Tarihsel OHLCV verileri. (`period` ve `interval` parametreleri alabilir). |
@@ -37,9 +36,12 @@ Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (S
 | `GET` | `/analysis/{symbol}` | Otomatik teknik analiz ve indikatör değerleri (RSI, SMA). |
 | `GET` | `/fx/list` | Takip edilen döviz ve emtiaların listesi. |
 | `GET` | `/fx/{symbol}` | Banka ve serbest piyasa kurları (Örn: `USD`, `EUR`, `gram-altin`). |
+| `GET` | `/crypto/list` | Desteklenen Kripto para kurları. |
+| `GET` | `/crypto/{symbol}` | Seçili Kripto paranın (Örn: `BTCUSDT`) değerleri. |
 | `GET` | `/funds/{code}` | TEFAS fon detayları (Örn: `AFT`, `TCD`). |
 | `GET` | `/funds/{code}/history` | Fonların tarihsel fiyat değişim verileri. |
-| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond verileri. |
+| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond piyasa verileri. |
+| `GET` | `/market/economy/calendar` | Bugünkü güncel veya yaklaşan önemli ekonomik etkinlikler. |
 | `GET` | `/search?q={query}` | Hisse kodu veya şirket adına göre arama yapar. |
 
 ---
@@ -48,19 +50,12 @@ Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (S
 
 Bu proje **Render**, **Railway** veya herhangi bir VPS üzerinde çalışmaya hazırdır.
 
-### Seçenek 1: Render.com (Önerilen)
+### OnRender Ücretsiz Sürüm (Keep-Alive Özelliği)
+Render normalde ücretsiz servisleri 15 dakika hareketsizlikten sonra uyutur. Bu durumun önüne geçmek için **BorsaPy API**, render linkinizi `RENDER_EXTERNAL_URL` ortam değişkeninden (otomatik oluşturulur) algılayarak her 14 dakikada bir kendi kendini uyarır (self-ping ping_regularly task) ve API'nizi 7/24 uyanık tutmaya çalışır. 
 
-1.  Bu projeyi GitHub hesabınıza **Fork** edin veya dosyaları yükleyin.
-2.  [Render Dashboard](https://dashboard.render.com/)'a gidin.
-3.  **New +** butonuna basıp **Web Service** seçin.
-4.  GitHub reponuzu bağlayın.
-5.  Aşağıdaki ayarları girin:
-    *   **Runtime:** `Python 3`
-    *   **Build Command:** `pip install -r requirements.txt`
-    *   **Start Command:** `uvicorn main:app --host 0.0.0.0 --port 10000`
-6.  **Create Web Service** butonuna basın.
+*Yine de tam garanti olması için ek bir güvenlik katmanı olarak [cron-job.org](https://cron-job.org) adresinden oluşturduğunuz render URL'nize (örn. `https://api-projem.onrender.com/`) her 10 dakikada bir istek atan ücretsiz bir ping görevi ayarlayabilirsiniz.*
 
-### Seçenek 2: Yerel Çalıştırma (Localhost)
+### Yerel Çalıştırma (Localhost)
 
 ```bash
 # Gerekli paketleri yükleyin
@@ -75,6 +70,4 @@ API şu adreste çalışacaktır: `http://127.0.0.1:8000`
 
 ## ⚠️ Yasal Uyarı
 
-Bu API tarafından sağlanan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi değildir. Veriler kaynak kuruluşlardan (İş Yatırım, TradingView, KAP vb.) sağlanmakta olup doğruluk garantisi verilmez.
-
----
+Bu API tarafından sağlanan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi değildir. Veriler üçüncü parti kaynaklardan sağlanmakta olup doğruluk veya kesintisizlik garantisi verilmez.
