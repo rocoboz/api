@@ -314,8 +314,7 @@ def get_fund_detail(request: Request, code: str, authorized: bool = Depends(veri
     try:
         def fetch():
             f = Fund(code)
-            data = {k: v for k, v in f.__dict__.items() if not k.startswith('_')}
-            return {"code": code.upper(), "data": data}
+            return {"code": code.upper(), "data": f.info if hasattr(f, 'info') else {}}
         return get_cached_fund_data(f"{code}_DETAIL", fetch)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
