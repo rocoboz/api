@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BorsaPy Dashboard</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --accent: #bb86fc;
+            --success: #03dac6;
+            --danger: #cf6679;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .text-light-dim {
+            color: #b0b0b0 !important;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid #333;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .form-select, .form-control {
+            background-color: #2c2c2c !important;
+            border: 1px solid #444 !important;
+            color: #fff !important;
+        }
+        
+        .form-control::placeholder {
+            color: #888;
+        }
+
+        .form-select:focus, .form-control:focus {
+            background-color: #2c2c2c !important;
+            color: #fff !important;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 0.25rem rgba(187, 134, 252, 0.25);
+        }
+
+        .btn-primary {
+            background-color: var(--accent);
+            border-color: var(--accent);
+            color: #000;
+            font-weight: bold;
+        }
+
+        .btn-primary:hover {
+            background-color: #a370db;
+            border-color: #a370db;
+        }
+
+        .badge-buy { background-color: var(--success); color: #000; }
+        .badge-sell { background-color: var(--danger); color: #000; }
+        .badge-neutral { background-color: #ffc107; color: #000; }
+        
+        /* Custom Type Selector */
+        .type-selector .btn-check:checked + .btn-outline-light {
+            background-color: var(--accent);
+            border-color: var(--accent);
+            color: #000;
+        }
+        .type-selector .btn-outline-light {
+            color: #aaa;
+            border-color: #444;
+        }
+        .type-selector .btn-outline-light:hover {
+            background-color: #333;
+            color: #fff;
+        }
+
+        .metric-value { font-size: 1.8rem; font-weight: bold; color: #fff; }
+        .metric-label { font-size: 0.85rem; color: #aaa; }
+        
+        #loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            visibility: hidden;
+        }
+        .spinner-border { width: 3rem; height: 3rem; color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <!-- Loading Spinner -->
+    <div id="loading">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Yükleniyor...</span>
+        </div>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-chart-line me-2" style="color: var(--accent);"></i>BorsaPy
+            </a>
+            <div class="d-flex">
+                <span class="navbar-text text-light small">
+                    API Status: <span class="badge bg-success" id="api-status">Checking...</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Search & Quick Look -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <!-- Type Selector -->
+                        <div class="btn-group w-100 mb-3 type-selector" role="group">
+                            <input type="radio" class="btn-check" name="dataType" id="type-stock" autocomplete="off" checked onchange="toggleType('stock')">
+                            <label class="btn btn-outline-light" for="type-stock"><i class="fas fa-building me-2"></i>Hisseler (BIST)</label>
+                          
+                            <input type="radio" class="btn-check" name="dataType" id="type-fund" autocomplete="off" onchange="toggleType('fund')">
+                            <label class="btn btn-outline-light" for="type-fund"><i class="fas fa-piggy-bank me-2"></i>Fonlar (TEFAS)</label>
+                        </div>
+
+                        <div class="d-flex align-items-center">
+                            <input type="text" id="search-input" class="form-control me-2" placeholder="Kod Girin (Örn: THYAO veya AFT)...">
+                            <button class="btn btn-primary px-4" onclick="fetchData()">
+                                <i class="fas fa-search"></i> Getir
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body p-3">
+                        <h6 class="card-title text-light-dim mb-3">Piyasa Özeti</h6>
+                        <div id="market-overview" class="d-flex flex-wrap gap-2">
+                            <span class="badge bg-secondary">Yükleniyor...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="row">
+            <!-- Left Column: Chart & Info -->
+            <div class="col-lg-8">
+                <!-- Header -->
+                <div class="card mb-4">
+                    <div class="card-body d-flex justify-content-between align-items-center">
+                        <div>
+                            <h2 class="m-0 text-white" id="display-symbol">---</h2>
+                            <span class="text-light-dim" id="display-name">Veri Bekleniyor</span>
+                        </div>
+                        <div class="text-end">
+                            <div class="metric-value" id="current-price">₺0.00</div>
+                            <span class="badge badge-neutral" id="price-change">-%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span id="chart-title">Fiyat Grafiği (Son 1 Ay)</span>
+                        <select class="form-select form-select-sm w-auto" id="period-select" onchange="fetchData()">
+                            <option value="1mo">1 Ay</option>
+                            <option value="3mo">3 Ay</option>
+                            <option value="1y">1 Yıl</option>
+                        </select>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="priceChart" height="300"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Analysis / Details -->
+            <div class="col-lg-4" id="analysis-column">
+                <!-- Content injected via JS based on type -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Logic -->
+    <script>
+        const API_BASE = "https://api-2vxc.onrender.com";
+        let priceChart = null;
+        let currentType = 'stock'; // 'stock' or 'fund'
+
+        // --- Utils ---
+        const showLoading = () => document.getElementById('loading').style.visibility = 'visible';
+        const hideLoading = () => document.getElementById('loading').style.visibility = 'hidden';
+        const formatMoney = (val) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(val);
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            checkApiStatus();
+            loadMarketOverview();
+            // Default
+            document.getElementById('search-input').value = 'THYAO';
+            fetchData();
+        });
+
+        function toggleType(type) {
+            currentType = type;
+            const input = document.getElementById('search-input');
+            if (type === 'stock') {
+                input.placeholder = "Hisse Kodu (Örn: THYAO, GARAN)...";
+                input.value = "THYAO"; 
+            } else {
+                input.placeholder = "Fon Kodu (Örn: AFT, TCD)...";
+                input.value = "AFT";
+            }
+            fetchData();
+        }
+
+        // --- API Calls ---
+
+        async function checkApiStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/`);
+                if (res.ok) document.getElementById('api-status').textContent = "Online";
+            } catch (e) {
+                document.getElementById('api-status').textContent = "Offline";
+                document.getElementById('api-status').className = "badge bg-danger";
+            }
+        }
+
+        async function loadMarketOverview() {
+            try {
+                const res = await fetch(`${API_BASE}/fx/list`);
+                const data = await res.json();
+                const container = document.getElementById('market-overview');
+                container.innerHTML = '';
+                
+                data.forEach(item => {
+                    if(['USD', 'EUR', 'gram-altin', 'gumus'].includes(item.symbol)) {
+                        const badge = document.createElement('span');
+                        badge.className = 'badge bg-secondary border border-secondary p-2';
+                        badge.style.background = '#333';
+                        badge.textContent = `${item.name}`;
+                        container.appendChild(badge);
+                    }
+                });
+            } catch (e) {
+                console.error("Market overview error:", e);
+            }
+        }
+
+        async function fetchData() {
+            const symbol = document.getElementById('search-input').value.toUpperCase().trim();
+            if (!symbol) return;
+            
+            showLoading();
+            
+            try {
+                if (currentType === 'stock') {
+                    await fetchStockData(symbol);
+                } else {
+                    await fetchFundData(symbol);
+                }
+            } catch (err) {
+                alert(`Hata: ${err.message}`);
+                console.error(err);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function fetchStockData(symbol) {
+            const period = document.getElementById('period-select').value;
+            
+            // Parallel fetch
+            const [histRes, analysisRes, detailRes] = await Promise.all([
+                fetch(`${API_BASE}/stocks/${symbol}/history?period=${period}&interval=1d`),
+                fetch(`${API_BASE}/analysis/${symbol}`),
+                fetch(`${API_BASE}/stocks/${symbol}`)
+            ]);
+
+            if (!histRes.ok) throw new Error("Hisse verisi bulunamadı");
+            const histData = await histRes.json();
+            const analysisData = analysisRes.ok ? await analysisRes.json() : null;
+            const detailData = detailRes.ok ? await detailRes.json() : null;
+
+            updateMainUI(symbol, detailData?.data?.longName || "BIST Hisse Senedi", histData);
+            renderAnalysisPanel(analysisData);
+        }
+
+        async function fetchFundData(code) {
+             // Fund history might not support 'period' param same way, but let's try calling history endpoint
+             // The API endpoint is /funds/{code}/history. It likely returns all available history.
+             const [histRes, detailRes] = await Promise.all([
+                fetch(`${API_BASE}/funds/${code}/history`),
+                fetch(`${API_BASE}/funds/${code}`)
+            ]);
+
+            if (!histRes.ok) throw new Error("Fon verisi bulunamadı");
+            
+            let histData = await histRes.json();
+            // If history is huge, slice it based on period select for chart performance
+            const period = document.getElementById('period-select').value;
+            let sliceDays = 30; 
+            if(period === '3mo') sliceDays = 90;
+            if(period === '1y') sliceDays = 365;
+            
+            if(Array.isArray(histData) && histData.length > sliceDays) {
+                histData = histData.slice(-sliceDays);
+            }
+
+            const detailData = detailRes.ok ? await detailRes.json() : null;
+            const fundName = detailData?.data?.title || "Yatırım Fonu"; // 'title' is a guess for attribute name, might be 'name'
+
+            updateMainUI(code, fundName, histData);
+            renderFundPanel(detailData?.data);
+        }
+
+        function updateMainUI(symbol, name, histData) {
+            document.getElementById('display-symbol').textContent = symbol;
+            document.getElementById('display-name').textContent = name;
+
+            if (histData && histData.length > 0) {
+                const last = histData[histData.length - 1];
+                const prev = histData.length > 1 ? histData[histData.length - 2] : last;
+                
+                // Flexible key checking for different data sources
+                const close = last['Close'] || last['close'] || last['price'] || last['Price'] || last['fiyat'];
+                const prevClose = prev['Close'] || prev['close'] || prev['price'] || prev['Price'] || prev['fiyat'];
+                
+                if (close !== undefined) {
+                    document.getElementById('current-price').textContent = formatMoney(close);
+                    
+                    if (prevClose) {
+                        const change = ((close - prevClose) / prevClose) * 100;
+                        const changeBadge = document.getElementById('price-change');
+                        changeBadge.textContent = `%${change.toFixed(2)}`;
+                        changeBadge.className = change >= 0 ? 'badge badge-buy' : 'badge badge-sell';
+                    }
+                }
+                renderChart(histData);
+            }
+        }
+
+        function renderAnalysisPanel(data) {
+            const container = document.getElementById('analysis-column');
+            
+            if (!data || data.error) {
+                container.innerHTML = `
+                    <div class="card text-center text-muted p-4">
+                        Veri yok veya analiz yapılamadı.
+                    </div>`;
+                return;
+            }
+
+            const indicators = data.indicators || {};
+            const rsi = indicators.RSI || '-';
+            const sma50 = indicators.SMA_50 || '-';
+            const sma200 = indicators.SMA_200 || '-';
+            const signal = data.signal || 'NEUTRAL';
+
+            let signalColor = '#ffc107';
+            if(signal === 'BUY') signalColor = 'var(--success)';
+            if(signal === 'SELL') signalColor = 'var(--danger)';
+
+            container.innerHTML = `
+                <!-- Signal Card -->
+                <div class="card mb-4 text-center">
+                    <div class="card-header">Teknik Sinyal</div>
+                    <div class="card-body">
+                        <div class="display-4 fw-bold mb-2" style="color: ${signalColor}">${signal}</div>
+                        <p class="text-light-dim small">RSI Tabanlı Otomatik Sinyal</p>
+                    </div>
+                </div>
+
+                <!-- Indicators -->
+                <div class="card mb-4">
+                    <div class="card-header">İndikatörler</div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-3 border-bottom border-secondary pb-2">
+                            <span>RSI (14)</span>
+                            <span class="fw-bold text-white">${rsi}</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-3 border-bottom border-secondary pb-2">
+                            <span>SMA 50</span>
+                            <span class="fw-bold text-white">${sma50}</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>SMA 200</span>
+                            <span class="fw-bold text-white">${sma200}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderFundPanel(data) {
+            const container = document.getElementById('analysis-column');
+            if(!data) {
+                 container.innerHTML = `<div class="card p-3">Detay yok</div>`;
+                 return;
+            }
+
+            // Filter out some keys we don't want to show
+            const ignore = ['code', 'history', 'title'];
+            let detailsHtml = '';
+            
+            // Limit to first 5-6 interesting attributes to avoid clutter
+            let count = 0;
+            for (const [key, val] of Object.entries(data)) {
+                if(ignore.includes(key) || typeof val === 'object' || count > 8) continue;
+                detailsHtml += `
+                    <div class="d-flex justify-content-between mb-2 border-bottom border-secondary pb-1 small">
+                        <span class="text-light-dim text-capitalize">${key.replace(/_/g, ' ')}</span>
+                        <span class="fw-bold text-white text-end" style="max-width: 50%;">${val}</span>
+                    </div>
+                `;
+                count++;
+            }
+
+            container.innerHTML = `
+                <div class="card">
+                    <div class="card-header">Fon Detayları</div>
+                    <div class="card-body">
+                        ${detailsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            const labels = data.map(d => {
+                const dateVal = d['Date'] || d['date'] || d['Datetime'] || d['tarih'];
+                return dateVal ? dateVal.split('T')[0] : '';
+            });
+            const prices = data.map(d => d['Close'] || d['close'] || d['price'] || d['Price'] || d['fiyat']);
+
+            if (priceChart) priceChart.destroy();
+
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Fiyat',
+                        data: prices,
+                        borderColor: '#bb86fc',
+                        backgroundColor: 'rgba(187, 134, 252, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(30, 30, 30, 0.9)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: '#555',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#aaa', maxTicksLimit: 8 } 
+                        },
+                        y: { 
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#aaa' } 
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'nearest',
+                    },
+                }
+            });
+        }
+    </script>
+</body>
+</html>

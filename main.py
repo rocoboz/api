@@ -255,6 +255,9 @@ def get_market_screener(request: Request, authorized: bool = Depends(verify_api_
             s = screener.Screener()
             # Default filter: Price > 0 (gets everything)
             s.add_filter("price", min=0.01)
+            # Add these specific filters so the API returns their data as well
+            s.add_filter("return_1d", min=-100, max=1000)
+            s.add_filter("volume_3m", min=0, max=100000)
             df = s.run()
             
             # Select relevant columns and rename for frontend clarity
@@ -353,10 +356,10 @@ def get_bond_detail(request: Request, name: str):
         def fetch():
             try:
                 b = Bond(name)
-                return {"name": name, "type": "Bond", "data": df_to_json(b.history())}
+                return {"name": name, "type": "Bond", "data": b.info if hasattr(b, 'info') else {}}
             except:
                 eb = Eurobond(name)
-                return {"name": name, "type": "Eurobond", "data": df_to_json(eb.history())}
+                return {"name": name, "type": "Eurobond", "data": eb.info if hasattr(eb, 'info') else {}}
         return get_long_cached_data(f"BOND_{name}", fetch)
     except Exception as e:
         raise HTTPException(status_code=404, detail="Bond not found")
@@ -372,10 +375,9 @@ def get_analysis(request: Request, symbol: str, authorized: bool = Depends(verif
             df = tk.history(period="1y")
             if df.empty: return {"error": "No data"}
             
-            ta = technical.TechnicalAnalyzer(df)
-            rsi = ta.calculate_rsi().iloc[-1] if hasattr(ta, 'calculate_rsi') else None
-            sma50 = ta.calculate_sma(period=50).iloc[-1] if hasattr(ta, 'calculate_sma') else None
-            sma200 = ta.calculate_sma(period=200).iloc[-1] if hasattr(ta, 'calculate_sma') else None
+            rsi = technical.calculate_rsi(df).iloc[-1] if hasattr(technical, 'calculate_rsi') else None
+            sma50 = technical.calculate_sma(df, period=50).iloc[-1] if hasattr(technical, 'calculate_sma') else None
+            sma200 = technical.calculate_sma(df, period=200).iloc[-1] if hasattr(technical, 'calculate_sma') else None
             
             return {
                 "symbol": symbol,
