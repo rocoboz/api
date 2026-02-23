@@ -6,6 +6,12 @@
 [![License](https://img.shields.io/pypi/l/borsapy)](https://github.com/saidsurucu/borsapy/blob/master/LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-API%20Reference-blue)](https://saidsurucu.github.io/borsapy/borsapy.html)
 
+> **Sorumluluk Reddi / Disclaimer**
+>
+> Bu kütüphane yalnızca kişisel kullanım ve eğitim amaçlıdır. Ticari yazılım ürünleri geliştirmek, ticari hizmetlerde kullanmak veya herhangi bir ticari amaçla kullanılamaz. Ticari kullanım için uygun bir lisans satın almak üzere Borsa İstanbul ile iletişime geçmelisiniz.
+>
+> This library is for personal and educational use only. It cannot be used for developing commercial software products, commercial services, or any commercial purposes. For commercial use, you must contact Borsa Istanbul to purchase an appropriate license.
+
 Türk finansal piyasaları için Python veri kütüphanesi. BIST hisseleri, döviz, kripto, yatırım fonları ve ekonomik veriler için yfinance benzeri API.
 
 [![Star History Chart](https://api.star-history.com/svg?repos=saidsurucu/borsapy&type=date&legend=top-left)](https://www.star-history.com/#saidsurucu/borsapy&type=date&legend=top-left)
@@ -48,6 +54,32 @@ print(fon.info)                      # Fon bilgileri
 enf = bp.Inflation()
 print(enf.latest())                  # Son TÜFE verileri
 ```
+
+## Komut Satırı Arayüzü (CLI)
+
+borsapy, terminal üzerinden hızlı veri erişimi için kapsamlı bir CLI sunar:
+
+```bash
+# Fiyat sorgula
+borsapy price THYAO GARAN ASELS
+
+# Geçmiş verileri CSV'ye kaydet
+borsapy history THYAO --period 1y --output csv > thyao.csv
+
+# Teknik sinyaller
+borsapy signals THYAO --interval 1h
+
+# Canlı izleme
+borsapy watch THYAO GARAN --interval 0.5
+
+# Teknik tarama
+borsapy scan "rsi < 30 and volume > 1000000" --index XU100
+
+# Temel tarama
+borsapy screen --template high_dividend --index XU030
+```
+
+**[CLI Dokümantasyonu →](CLI.md)** | 25+ komut: fiyat, geçmiş, teknik analiz, mali tablolar, tarama ve daha fazlası.
 
 ---
 
@@ -508,9 +540,9 @@ print(eth.current)
 
 ---
 
-## Fund (Yatırım Fonları)
+## Fund (Yatırım ve Emeklilik Fonları)
 
-TEFAS üzerinden yatırım fonu verileri.
+TEFAS üzerinden yatırım fonu ve emeklilik fonu verileri.
 
 ### Temel Kullanım
 
@@ -520,12 +552,30 @@ import borsapy as bp
 # Fon arama
 print(bp.search_funds("banka"))
 
-# Fon verisi
+# Yatırım Fonu (YAT) - varsayılan
 fon = bp.Fund("AAK")
 print(fon.info)                     # Fon bilgileri
-print(fon.history(period="1ay"))    # Fiyat geçmişi
+print(fon.history(period="1mo"))    # Fiyat geçmişi
 print(fon.performance)              # Performans verileri
+
+# Emeklilik Fonu (EMK) - explicit
+emk = bp.Fund("KJM", fund_type="EMK")
+print(emk.info)                     # Emeklilik fonu bilgileri
+print(emk.history(period="1mo"))    # Fiyat geçmişi
+
+# Auto-detection: fund_type belirtilmezse otomatik algılanır
+emk = bp.Fund("KJM")                # Otomatik olarak EMK algılanır
+print(emk.fund_type)                # "EMK"
 ```
+
+### Fon Tipleri
+
+| Kod | Açıklama | Örnek |
+|-----|----------|-------|
+| `YAT` | Yatırım Fonları (Investment Funds) | `bp.Fund("AAK")` |
+| `EMK` | Emeklilik Fonları (Pension Funds) | `bp.Fund("KJM", fund_type="EMK")` |
+
+> **Not**: `fund_type` belirtilmezse otomatik algılama yapılır (önce YAT, sonra EMK denenir).
 
 ### Varlık Dağılımı
 
@@ -549,12 +599,16 @@ print(fon.info['category_rank'])    # Kategori sırası (örn: 20/181)
 ### Fon Tarama
 
 ```python
-# Getiri kriterlerine göre filtrele
+# Yatırım fonlarını filtrele (varsayılan)
 df = bp.screen_funds(fund_type="YAT", min_return_1y=50)   # >%50 1Y getiri
-df = bp.screen_funds(fund_type="EMK", min_return_ytd=20)  # Emeklilik fonları
 df = bp.screen_funds(min_return_1m=5)                     # Son 1 ayda >%5
 
-# Fon tipleri: YAT (yatırım), EMK (emeklilik), None (tümü)
+# Emeklilik fonlarını filtrele
+df = bp.screen_funds(fund_type="EMK")                     # Tüm emeklilik fonları
+df = bp.screen_funds(fund_type="EMK", min_return_ytd=20)  # >%20 YTD getiri
+df = bp.screen_funds(fund_type="EMK", min_return_1y=30)   # >%30 1Y getiri
+
+# Fon tipleri: "YAT" (yatırım - varsayılan), "EMK" (emeklilik)
 ```
 
 ### Fon Karşılaştırma
@@ -610,6 +664,7 @@ fon.history(period="max")  # Tüm veri (5 yıla kadar)
 
 ```python
 import borsapy as bp
+from datetime import date
 
 # Portföy oluşturma
 portfolio = bp.Portfolio()
@@ -622,17 +677,56 @@ portfolio.add("USD", shares=1000, asset_type="fx")       # Döviz
 portfolio.add("BTCTRY", shares=0.5)                      # Kripto (auto-detect)
 portfolio.add("YAY", shares=1000, asset_type="fund")     # Yatırım Fonu
 
+# Alım tarihi ile ekleme (getiri hesaplamaları için)
+portfolio.add("ASELS", shares=50, cost=120.0, purchase_date="2024-01-15")  # String format
+portfolio.add("BIMAS", shares=30, cost=150.0, purchase_date=date(2024, 6, 1))  # date objesi
+
 # Benchmark ayarlama (Index karşılaştırması için)
 portfolio.set_benchmark("XU100")                         # XU030, XK030 da olabilir
 
 # Portföy durumu
-print(portfolio.holdings)     # DataFrame: symbol, shares, cost, current_price, value, weight, pnl, pnl_pct
+print(portfolio.holdings)     # DataFrame: symbol, shares, cost, value, weight, pnl, purchase_date, holding_days
 print(portfolio.value)        # Toplam değer (TL)
 print(portfolio.cost)         # Toplam maliyet
 print(portfolio.pnl)          # Kar/zarar (TL)
 print(portfolio.pnl_pct)      # Kar/zarar (%)
 print(portfolio.weights)      # {'THYAO': 0.45, 'GARAN': 0.35, ...}
 ```
+
+### Alım Tarihi (purchase_date)
+
+Holdinglere alım tarihi eklenerek daha isabetli getiri hesaplamaları yapılabilir:
+
+```python
+import borsapy as bp
+from datetime import date
+
+portfolio = bp.Portfolio()
+
+# Farklı tarihlerde alınmış hisseler
+portfolio.add("THYAO", shares=100, cost=280.0, purchase_date="2024-01-15")
+portfolio.add("GARAN", shares=200, cost=45.0, purchase_date=date(2024, 6, 1))
+portfolio.add("ASELS", shares=50, cost=120.0)  # Tarih verilmezse bugün
+
+# Holdings DataFrame'de purchase_date ve holding_days sütunları
+print(portfolio.holdings[['symbol', 'cost', 'purchase_date', 'holding_days']])
+#   symbol  cost purchase_date  holding_days
+# 0  THYAO   280    2024-01-15           380
+# 1  GARAN    45    2024-06-01           242
+# 2  ASELS   120    2026-01-29             0
+
+# Risk metrikleri artık holding bazlı tarih kullanır
+# Her holding için sadece purchase_date sonrası veriler dahil edilir
+metrics = portfolio.risk_metrics(period="1y")
+```
+
+**Desteklenen Tarih Formatları:**
+| Format | Örnek | Açıklama |
+|--------|-------|----------|
+| `str` | `"2024-01-15"` | ISO format (YYYY-MM-DD) |
+| `date` | `date(2024, 1, 15)` | Python date objesi |
+| `datetime` | `datetime(2024, 1, 15)` | Sadece tarih kısmı kullanılır |
+| `None` | - | Bugünün tarihi varsayılan |
 
 ### Desteklenen Varlık Tipleri
 
@@ -716,11 +810,12 @@ portfolio.add("THYAO", shares=100, cost=280).add("GARAN", shares=200, cost=50).s
 data = portfolio.to_dict()
 print(data)
 # {'benchmark': 'XU100', 'holdings': [
-#     {'symbol': 'THYAO', 'shares': 100, 'cost_per_share': 280.0, 'asset_type': 'stock'},
+#     {'symbol': 'THYAO', 'shares': 100, 'cost_per_share': 280.0,
+#      'asset_type': 'stock', 'purchase_date': '2024-01-15'},
 #     ...
 # ]}
 
-# Dict'ten import
+# Dict'ten import (purchase_date korunur)
 portfolio2 = bp.Portfolio.from_dict(data)
 
 # JSON'a kaydetme
@@ -868,7 +963,8 @@ import borsapy as bp
 from borsapy.technical import (
     calculate_sma, calculate_ema, calculate_rsi, calculate_macd,
     calculate_bollinger_bands, calculate_atr, calculate_stochastic,
-    calculate_obv, calculate_vwap, calculate_adx, add_indicators
+    calculate_obv, calculate_vwap, calculate_adx, calculate_supertrend,
+    calculate_tilson_t3, add_indicators
 )
 
 # Herhangi bir DataFrame üzerinde kullanım
@@ -898,6 +994,70 @@ df_with_indicators = add_indicators(df, indicators=["sma", "rsi"])  # Sadece bel
 | OBV | `obv()` | Denge Hacmi (Volume gerektirir) |
 | VWAP | `vwap()` | Hacim Ağırlıklı Ortalama Fiyat (Volume gerektirir) |
 | ADX | `adx()` | Ortalama Yön Endeksi (0-100) |
+| Supertrend | `supertrend()` | Trend takip göstergesi (ATR-tabanlı) |
+| Tilson T3 | `tilson_t3()` | Triple-smoothed EMA (düşük gecikme) |
+
+### Supertrend
+
+ATR-tabanlı trend takip göstergesi.
+
+```python
+import borsapy as bp
+
+stock = bp.Ticker("THYAO")
+
+# Son değerler
+st = stock.supertrend()
+print(st['value'])       # 282.21 (Supertrend çizgisi)
+print(st['direction'])   # 1 (bullish) veya -1 (bearish)
+print(st['upper'])       # 303.69 (üst band)
+print(st['lower'])       # 282.21 (alt band)
+
+# Custom parametreler
+st = stock.supertrend(period="6mo", atr_period=7, multiplier=2.0)
+
+# TechnicalAnalyzer ile tüm seriler
+ta = stock.technicals(period="1y")
+st_df = ta.supertrend()  # DataFrame: Supertrend, Direction, Upper, Lower
+
+# Pure function
+df = stock.history(period="1y")
+st_df = bp.calculate_supertrend(df, atr_period=10, multiplier=3.0)
+```
+
+**Supertrend Yorumlama:**
+- `direction = 1`: Bullish trend (fiyat Supertrend üzerinde)
+- `direction = -1`: Bearish trend (fiyat Supertrend altında)
+- Trend değişimi: direction'ın işaret değiştirmesi
+
+### Tilson T3
+
+Triple-smoothed EMA ile düşük gecikmeli hareketli ortalama.
+
+```python
+import borsapy as bp
+
+stock = bp.Ticker("THYAO")
+
+# Son değer
+t3 = stock.tilson_t3()              # 296.24
+t3 = stock.tilson_t3(t3_period=8)   # Farklı period
+
+# TechnicalAnalyzer ile
+ta = stock.technicals(period="1y")
+t3_series = ta.tilson_t3(period=5, vfactor=0.7)
+
+# Pure function
+df = stock.history(period="1y")
+t3_series = bp.calculate_tilson_t3(df, period=5, vfactor=0.7)
+```
+
+**Tilson T3 Parametreleri:**
+- `period`: T3 periyodu (varsayılan 5)
+- `vfactor`: Volume faktörü (varsayılan 0.7)
+  - 0.5 = daha responsive (hızlı tepki)
+  - 0.7 = Tilson'ın önerisi
+  - 0.9 = daha smooth (pürüzsüz)
 
 ### Heikin Ashi Charts
 
@@ -2022,6 +2182,7 @@ print(results[['symbol', 'rsi', 'volume', 'conditions_met']])
 |----------|----------|-------|
 | **Quote** | `price`, `volume`, `change_percent`, `bid`, `ask` | `price > 100` |
 | **Göstergeler** | `rsi`, `sma_N`, `ema_N`, `macd`, `signal`, `bb_upper/lower`, `adx`, `atr`, `cci`, `stoch_k/d` | `rsi < 30` |
+| **Lokal** | `supertrend`, `supertrend_direction`, `t3` | `supertrend_direction == 1` |
 | **Crossover** | `crosses`, `crosses_above`, `crosses_below` | `sma_20 crosses_above sma_50` |
 | **Yüzde** | `above_pct`, `below_pct` | `close above_pct sma_50 1.05` |
 
@@ -2074,6 +2235,38 @@ bb_low = bp.scan("XU030", "close < bb_lower")
 # Saatlik RSI oversold
 hourly_oversold = bp.scan("XU030", "rsi < 30", interval="1h")
 ```
+
+### Lokal Hesaplanan Göstergeler (Supertrend, T3)
+
+Supertrend ve Tilson T3 göstergeleri TradingView Scanner API'de bulunmadığı için lokal olarak hesaplanır.
+
+```python
+import borsapy as bp
+
+# Supertrend Taramaları
+bullish = bp.scan("XU030", "supertrend_direction == 1")   # Yükseliş trendi
+bearish = bp.scan("XU030", "supertrend_direction == -1")  # Düşüş trendi
+above_st = bp.scan("XU030", "close > supertrend")         # Fiyat supertrend üstünde
+
+# Tilson T3 Taramaları
+above_t3 = bp.scan("XU030", "close > t3")                 # Fiyat T3 üstünde
+below_t3 = bp.scan("XU030", "close < t3")                 # Fiyat T3 altında
+
+# Kombinasyon: RSI oversold + Supertrend bullish
+combo = bp.scan("XU030", "rsi < 30 and supertrend_direction == 1")
+
+# Sonuçları incele
+print(bullish[['symbol', 'supertrend', 'supertrend_direction', 'close']])
+```
+
+**Desteklenen Lokal Alanlar:**
+| Alan | Açıklama |
+|------|----------|
+| `supertrend` | Supertrend değeri |
+| `supertrend_direction` | 1 = yükseliş, -1 = düşüş |
+| `supertrend_upper` | Üst band |
+| `supertrend_lower` | Alt band |
+| `t3` / `tilson_t3` | Tilson T3 değeri |
 
 ---
 
@@ -2145,7 +2338,7 @@ print(sonuc)
 - **Eurobond**: Türk devlet eurobondları - 38+ tahvil, USD/EUR (ziraatbank.com.tr)
 - **EconomicCalendar**: Ekonomik takvim - 7 ülke desteği (doviz.com)
 - **Screener**: Hisse tarama - 50+ kriter, sektör/endeks filtreleme (İş Yatırım)
-- **Teknik Analiz**: 10+ gösterge (SMA, EMA, RSI, MACD, Bollinger, ATR, Stochastic, OBV, VWAP, ADX, Heikin Ashi)
+- **Teknik Analiz**: 12+ gösterge (SMA, EMA, RSI, MACD, Bollinger, ATR, Stochastic, OBV, VWAP, ADX, Supertrend, Tilson T3, Heikin Ashi)
 - **KAP Entegrasyonu**: Resmi bildirimler ve takvim
 
 ---

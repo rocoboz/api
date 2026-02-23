@@ -51,6 +51,9 @@ class IsYatirimProvider(BaseProvider):
         "XUTUM": "BIST Tüm",
     }
 
+    def __init__(self):
+        super().__init__(verify=False)
+
     def get_realtime_quote(self, symbol: str) -> dict[str, Any]:
         """
         Get real-time quote for a symbol using OneEndeks API.

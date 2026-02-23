@@ -20,6 +20,7 @@ class BaseProvider:
         self,
         timeout: float = 30.0,
         cache: Cache | None = None,
+        verify: bool = True,
     ):
         """
         Initialize the provider.
@@ -27,8 +28,11 @@ class BaseProvider:
         Args:
             timeout: HTTP request timeout in seconds.
             cache: Cache instance to use. If None, uses global cache.
+            verify: Whether to verify SSL certificates.
         """
-        self._client = httpx.Client(timeout=timeout, headers=self.DEFAULT_HEADERS)
+        self._client = httpx.Client(
+            timeout=timeout, headers=self.DEFAULT_HEADERS, verify=verify
+        )
         self._cache = cache or get_cache()
 
     def close(self) -> None:
