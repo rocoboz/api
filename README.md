@@ -1,51 +1,44 @@
-# 📊 BorsaPy Ultimate API (v1.1.0 - Ultimate Edition)
+# 📊 BorsaPy Ultimate API (v1.2.0 - Hybrid AI Engine)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green?style=for-the-badge&logo=fastapi&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Ultimate_Edition-success?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Hybrid_AI_Enabled-success?style=for-the-badge)
 
-**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP, Fonlar ve Makroekonomik verileri milisaniyeler içinde sunan, **yüksek performanslı ve AI destekli** bir finansal ağ geçididir. v1.1.0 sürümü ile artık sadece veri sunmakla kalmıyor, veriyi yorumlayan bir akıl sunuyor.
+**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP ve Fon verilerini sunan **yüksek performanslı ve Hibrit AI destekli** bir finansal ağ geçididir. v1.2.0 sürümü ile Twitter'a bağımlılığı bitiriyor; KAP haberlerini ve teknik/temel verileri harmanlayan "Insight" motorunu sunuyoruz.
 
 ---
 
-## 💎 v1.1.0 Ultimate Özellikler
+## 💎 v1.2.0 Hibrit AI Özellikleri
 
-*   **🧠 AI Sentiment Engine (Duyarlılık Analizi):** `/analysis/{symbol}/sentiment` uç noktası ile hisse hakkındaki sosyal medya ve haber akışını tarayarak **BULLISH (Boğa)** veya **BEARISH (Ayı)** skorlaması yapar.
-*   **🗓️ Ekonomik Takvim (Financial Calendar):** `/market/economy/calendar` ile Türkiye ve Dünya piyasalarındaki kritik gelişmeleri (Faiz, Enflasyon, Fed) anlık takip edin.
-*   **💰 Temettü Takvimi & Bilanço:** Şirketlerin geçmiş temettü ödemeleri ve detaylı gelir tabloları (Income Statement, Balance Sheet) artık bir endpoint uzaklığında.
-*   **📡 Gelişmiş Teknik Sinyal v2:** RSI ve Supertrend'e ek olarak; **MA50/MA200 (Golden Cross) takibi** ve otomatik "STRONG BUY" sinyal motoru eklendi.
-*   **🛡️ Zero-Ban Archive:** KAP ve PDF verileri için 24 saatlik statik cache kalkanı devam ediyor.
+*   **🧠 Hibrit Insight Motoru:** `/analysis/{symbol}/insight` ucu ile hissenin **Teknik (RSI, MA), Temel (F/K, PD/DD) ve Haber (KAP)** verilerini tek bir potada eriterek **0-100 arası bir Güven Skoru** üretir.
+*   **📡 Bağımsız KAP Analizi:** Twitter Auth bilgisi olmasa bile, en güncel KAP bildirimlerini okuyup sentiment (duyarlılık) analizi yapar. 
+*   **📊 Gerçek Veri Odaklı:** "0" veya hatalı veri riskine karşı tüm finansal çarpanlar (P/E, P/B) ve hacim verileri doğrulanmıştır.
+*   **🗓️ Global Ekonomik Ajanda:** `/market/economy/calendar` ile artık sadece Türkiye değil, dünya piyasalarındaki dev olayları da takip edebilirsiniz.
 
 ---
 
 ## 📡 API Uç Noktaları (Endpoints)
 
-### 🧠 Akıllı Analiz & AI
+### 🧠 AI & Akıllı Analiz
 | Metod | Uç Nokta | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/analysis/{symbol}/sentiment` | **AI:** Sosyal medya duyarlılık skoru ve "Bullish/Bearish" etiketi. |
-| `GET` | `/analysis/{symbol}` | **Pro:** RSI, Supertrend, MA50/200 ve "Strong Buy" sinyalleri. |
+| `GET` | `/analysis/{symbol}/insight` | **ULTIMATE:** Teknik + Temel + KAP Haber harmanlı 0-100 puanlı analiz. |
+| `GET` | `/analysis/{symbol}/sentiment` | **Twitter:** Sosyal medya duyarlılık analizi (Opsiyonel Auth gerektirir). |
+| `GET` | `/analysis/{symbol}` | **Teknik:** RSI, Supertrend ve Golden Cross sinyal motoru. |
 
-### 📈 Hisse Senedi & Finansallar
+### 📈 Hisse Senedi & Piyasa
 | Metod | Uç Nokta | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/stocks/{symbol}/dividends` | Şirketin kuruşu kuruşuna tüm temettü geçmişi. |
-| `GET` | `/stocks/{symbol}/financials` | Gelir tablosu, Bilanço veya Nakit Akışı özetleri. |
-| `GET` | `/stocks/list` | Tüm aktif BIST şirketlerinin listesi. |
-| `GET` | `/market/screener` | F/K, PD/DD, Hacim ve Piyasa Değeri bazlı gelişmiş tarama. |
+| `GET` | `/stocks/{symbol}/dividends` | Şirketin geçmiş temettü ödemeleri. |
+| `GET` | `/stocks/{symbol}/financials` | Gelir tablosu ve Bilanço özetleri. |
+| `GET` | `/market/screener` | PD/DD, F/K ve Hacim içeren profesyonel tarayıcı. |
+| `GET` | `/market/breadth` | BIST para girişi ve yükselen/düşen hacim dağılımı. |
 
 ### 💰 Fonlar (TEFAS & KAP)
 | Metod | Uç Nokta | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/funds/list` | TEFAS'taki tüm fonların listesi (`?fund_type=YAT` veya `EYF`). |
-| `GET` | `/funds/{code}/estimated-return` | **AMİRAL GEMİSİ:** Fonun PDF içeriğini analiz ederek anlık getiri tahminler. |
-
-### 🌍 Piyasa & Ajanda (Ultra-Pro)
-| Metod | Uç Nokta | Açıklama |
-| :--- | :--- | :--- |
-| `GET` | `/market/economy/calendar` | **Yeni:** Küresel ve yerel ekonomik takvim (`?scope=today/week/month`). |
-| `GET` | `/market/breadth` | BIST para akışı (Yükselen/Düşen Hacim Dağılımı). |
-| `GET` | `/market/heatmap` | Sektörel değişim ve hacim odaklı ısı haritası. |
+| `GET` | `/funds/list` | Tüm aktif yatırım ve emeklilik fonları listesi. |
+| `GET` | `/funds/{code}/estimated-return` | **Deep Scan:** Fonun PDF içeriğine göre anlık getiri tahmini. |
 
 ---
 
@@ -61,10 +54,10 @@ uvicorn main:app --reload
 ```
 
 ### Sunucu Ayarları (Render / Docker)
-*   **API_KEY:** `x-api-key` header üzerinden yetkilendirme sağlar.
-*   **TWITTER_AUTH_TOKEN & CT0:** Sosyal duyarlılık analizi için gereklidir.
+*   **API_KEY:** Yetkilendirme için gereklidir.
+*   **TWITTER_AUTH_TOKEN & CT0:** Sadece sosyal medya sentiment analizi kullanılacaksa gereklidir. Insight motoru için **zorunlu değildir**.
 
 ---
 
 ## ⚠️ Yasal Uyarı
-Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** AI tarafından üretilen skorlar hatalı olabilir, yatırım kararlarınızı profesyonel danışmanlara danışarak alınız.
+Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** AI skorları algoritmik tahminlerdir, son karar yatırımcının kendisine aittir.

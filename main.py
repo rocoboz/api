@@ -489,6 +489,92 @@ def get_sentiment_analysis(symbol: str):
             return {"error": str(e)}
     return get_cached_market(f"SENTIMENT_{symbol}", fetch)
 
+@app.get("/analysis/{symbol}/insight")
+def get_hybrid_insight(symbol: str):
+    """
+    ULTIMATE INSIGHT: Hybrid analysis combining Technical, Fundamental, and KAP News (v1.2.0).
+    Returns a score from 0 to 100. No Twitter required.
+    """
+    symbol = symbol.upper()
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            score = 50 # Neutral start
+            reasons = []
+            
+            # 1. Technical Analysis (40%)
+            df = tk.history(period="1y")
+            if not df.empty:
+                rsi = technical.calculate_rsi(df).iloc[-1]
+                if rsi < 30: 
+                    score += 15
+                    reasons.append("RSI aşırı satım bölgesinde (Tepki yükselişi beklentisi)")
+                elif rsi > 70:
+                    score -= 15
+                    reasons.append("RSI aşırı alım bölgesinde (Kari realizasyonu riski)")
+                
+                ma50 = df['Close'].rolling(50).mean().iloc[-1]
+                ma200 = df['Close'].rolling(200).mean().iloc[-1]
+                if ma50 > ma200:
+                    score += 10
+                    reasons.append("Golden Cross (50/200 MA) pozitif trend hakim")
+                
+            # 2. News/KAP Sentiment (30%)
+            news_df = None
+            try:
+                news_df = tk.news
+                if news_df is not None and not news_df.empty:
+                    titles = news_df['Title'].head(15).tolist()
+                    news_sent = analyze_sentiment(titles)
+                    if news_sent["label"] == "BULLISH":
+                        score += 15
+                        reasons.append(f"Resmi KAP haber akışı pozitif ({news_sent['score']})")
+                    elif news_sent["label"] == "BEARISH":
+                        score -= 15
+                        reasons.append(f"KAP haber akışında negatif başlıklar var ({news_sent['score']})")
+            except Exception:
+                pass # Skip news if provider fails
+            
+            # 3. Fundamental (30%) - Re-use screener logic for exact metrics
+            pe, pddd = None, None
+            try:
+                from tradingview_screener import Query
+                q = Query().set_markets('turkey').select('name', 'price_earnings_ttm', 'price_book_ratio')
+                _, df_scr = q.get_scanner_data()
+                if not df_scr.empty:
+                    match = df_scr[df_scr['name'] == symbol]
+                    if not match.empty:
+                        pe = match.iloc[0].get("price_earnings_ttm")
+                        pddd = match.iloc[0].get("price_book_ratio")
+                        if pe and pe < 15:
+                            score += 10
+                            reasons.append(f"F/K oranı ({round(pe,1)}) sektör ortalamasının altında")
+                        if pddd and pddd < 3:
+                            score += 10
+                            reasons.append(f"PD/DD ({round(pddd,1)}) defter değerinde iskontolu")
+            except Exception:
+                pass # Skip fundamental if screener fails
+            
+            # Final capping
+            final_score = max(0, min(100, score))
+            sentiment = "VERY BULLISH" if final_score >= 80 else ("BULLISH" if final_score >= 60 else ("BEARISH" if final_score < 40 else "NEUTRAL"))
+            
+            return {
+                "symbol": symbol,
+                "score": final_score,
+                "sentiment": sentiment,
+                "reasons": reasons,
+                "data_points": {
+                    "rsi": round(rsi, 2) if 'rsi' in locals() else None,
+                    "pe": round(pe, 2) if pe else None,
+                    "pddd": round(pddd, 2) if pddd else None,
+                    "news_count": len(news_df) if news_df is not None else 0
+                }
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    return get_cached_market(f"INSIGHT_{symbol}", fetch)
+
 # --- ENDPOINTS: FUNDS ---
 
 @app.get("/funds/{code}/estimated-return")
