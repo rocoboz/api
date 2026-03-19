@@ -342,17 +342,35 @@ def compare(symbols: str = Query(...)):
     return get_cached_market(f"COMPARE_{symbols}", fetch)
 
 @app.get("/market/screener")
-def stock_screener(template: Optional[str] = None, pe_max: Optional[float] = None):
+def stock_screener(template: Optional[str] = None):
+    """
+    Returns high-performance stock screening data using TradingView (v1.0.7).
+    """
     def fetch():
-        s = screener.Screener()
-        if pe_max: s.add_filter("pe", max=pe_max)
-        df = s.run(template=template)
-        # Simplified mapping
-        data = []
-        for _, row in df.iterrows():
-            data.append({"symbol": row.get("symbol"), "price": row.get("criteria_7"), "pe": row.get("criteria_28")})
-        return data
-    return get_cached_market(f"SCREENER_{template}_{pe_max}", fetch)
+        try:
+            from tradingview_screener import Query
+            # Fetching: Name, Close, Change, Volume, P/E (TTM), P/B (Ratio), Market Cap
+            q = Query().set_markets('turkey').select(
+                'name', 'close', 'change', 'volume', 'price_book_ratio', 'market_cap_basic', 'price_earnings_ttm'
+            )
+            _, df = q.get_scanner_data()
+            
+            if df.empty: return []
+            
+            # Map columns to user-friendly names
+            df = df.rename(columns={
+                "name": "symbol",
+                "close": "price",
+                "price_book_ratio": "pddd",
+                "price_earnings_ttm": "pe",
+                "market_cap_basic": "market_cap"
+            })
+            
+            # Clean values (nan -> null)
+            return df_to_json(df)
+        except Exception as e:
+            return {"error": str(e)}
+    return get_cached_market(f"SCREENER_V2_{template}", fetch)
 
 @app.get("/analysis/{symbol}")
 def get_analysis_pro(symbol: str):
@@ -506,15 +524,23 @@ def get_market_breadth(request: Request):
             if df.empty: return {"error": "Breadth data unavailable"}
             
             changes = df['change'].astype(float)
+            vols = df['volume'].astype(float)
             
-            up = int((changes > 0).sum())
-            down = int((changes < 0).sum())
-            neutral = int((changes == 0).sum())
+            up_mask = changes > 0
+            down_mask = changes < 0
+            neutral_mask = changes == 0
+            
+            up = int(up_mask.sum())
+            down = int(down_mask.sum())
+            neutral = int(neutral_mask.sum())
             
             return {
                 "up": up,
                 "down": down,
                 "neutral": neutral,
+                "up_volume": float(vols[up_mask].sum()),
+                "down_volume": float(vols[down_mask].sum()),
+                "neutral_volume": float(vols[neutral_mask].sum()),
                 "ratio": round(up/down, 2) if down > 0 else up,
                 "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL"),
                 "sample_size": len(changes)
