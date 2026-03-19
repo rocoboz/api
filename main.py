@@ -496,13 +496,12 @@ def get_market_breadth(request: Request):
     """
     def fetch():
         try:
-            s = screener.Screener()
-            df = s.run()
+            from tradingview_screener import Query
+            _, df = Query().set_markets('turkey').select('name', 'change', 'volume', 'sector').get_scanner_data()
             
             if df.empty: return {"error": "Breadth data unavailable"}
             
-            # criteria_5 is % Change in the default screener template
-            changes = df['criteria_5'].astype(float)
+            changes = df['change'].astype(float)
             
             up = int((changes > 0).sum())
             down = int((changes < 0).sum())
@@ -526,23 +525,23 @@ def get_market_heatmap():
     Returns Sector-based performance grouping for Heatmap visualization.
     """
     def fetch():
-        # Using Screener to get bulk data is more efficient than individual Tickers
-        s = screener.Screener()
-        df = s.run() # Default template has basic performance
-        
-        # Group by Sector/Industry
-        # Note: mapping depends on provider structure. We'll group by available columns.
-        if df.empty: return {"error": "Heatmap data currently unavailable"}
-        
-        heatmap = []
-        # Grouping by 'sector' if available, or just Top 50 symbols
-        for _, row in df.head(50).iterrows():
-            heatmap.append({
-                "symbol": row.get("symbol"),
-                "change": round(float(row.get("criteria_5", 0)), 2), # % Change
-                "volume": float(row.get("criteria_13", 0)) # Volume
-            })
-        return heatmap
+        try:
+            from tradingview_screener import Query
+            _, df = Query().set_markets('turkey').select('name', 'change', 'volume', 'sector').get_scanner_data()
+            
+            if df.empty: return {"error": "Heatmap data currently unavailable"}
+            
+            heatmap = []
+            for _, row in df.head(50).iterrows():
+                heatmap.append({
+                    "symbol": row.get("name"),
+                    "change": round(float(row.get("change", 0)), 2),
+                    "volume": float(row.get("volume", 0)),
+                    "sector": str(row.get("sector", "N/A"))
+                })
+            return heatmap
+        except Exception as e:
+            return {"error": str(e)}
     return get_cached_market("MARKET_HEATMAP", fetch)
 
 @app.get("/market/economy/rates")
