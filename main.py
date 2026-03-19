@@ -549,7 +549,12 @@ def get_tcmb_rates():
     """
     Returns latest interest rates from TCMB.
     """
-    return get_cached_static("TCMB_RATES", lambda: df_to_json(TCMB().rates))
+    def fetch():
+        try:
+            return df_to_json(TCMB().rates)
+        except Exception as e:
+            return {"error": f"TCMB Provider Error: {str(e)}"}
+    return get_cached_static("TCMB_RATES", fetch)
 
 # --- ENDPOINTS: VIOP ---
 @app.get("/viop/list")
