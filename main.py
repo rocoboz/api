@@ -14,7 +14,9 @@ from concurrent.futures import ThreadPoolExecutor
 base_dir = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(base_dir, 'borsapy_lib')
 if os.path.exists(lib_path):
-    sys.path.insert(0, lib_path)
+    # Use append instead of insert(0) to prioritize pip-installed Linux packages on Render
+    # while still allowing custom 'borsapy' library to be found.
+    sys.path.append(lib_path)
 
 # --- THIRD PARTY ---
 from fastapi import FastAPI, HTTPException, Query, Request, Security, Depends
