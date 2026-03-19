@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Union
 from zoneinfo import ZoneInfo
 
-# --- PATH SETUP ---
+import threading
+from concurrent.futures import ThreadPoolExecutor
 base_dir = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(base_dir, 'borsapy_lib')
 if os.path.exists(lib_path):
@@ -36,6 +37,7 @@ try:
     from borsapy import market, technical, screener, EconomicCalendar
     from borsapy import Inflation, TCMB, VIOP, Portfolio, tax
     from borsapy import search_funds, screen_funds, compare_funds
+    from borsapy import search_tweets, set_twitter_auth, clear_twitter_auth
     from borsapy.twitter import search_tweets
     from borsapy._providers.kap import get_kap_provider
     from borsapy._providers.kap_holdings import get_kap_holdings_provider
@@ -226,6 +228,9 @@ async def startup_event():
             from borsapy import set_twitter_auth
             set_twitter_auth(auth_token=T_TOKEN, ct0=T_CT0)
         except: pass
+
+# --- GLOBAL LOCKS ---
+twitter_lock = threading.Lock()
 
 # --- ENDPOINTS: BASE ---
 @app.get("/ping")
@@ -572,6 +577,44 @@ def tax_table():
     return get_cached_static("TAX_TABLE", lambda: df_to_json(tax.withholding_tax_table()))
 
 # --- ENDPOINTS: SEARCH ---
+# --- ENDPOINTS: TWITTER (Enhanced Dynamic Auth) ---
+@app.get("/search/tweets")
+def twitter_search(
+    q: str, 
+    limit: int = 15, 
+    auth_token: Optional[str] = Query(None, description="Twitter auth_token cookie"),
+    ct0: Optional[str] = Query(None, description="Twitter ct0 cookie")
+):
+    """
+    Search Twitter/X for tweets. (v1.0.7 - Dynamic Session Support)
+    Allows users to provide their own session tokens.
+    """
+    def fetch():
+        with twitter_lock:
+            try:
+                env_token = os.getenv("TWITTER_AUTH_TOKEN")
+                env_ct0 = os.getenv("TWITTER_CT0")
+                
+                if auth_token and ct0:
+                    set_twitter_auth(auth_token=auth_token, ct0=ct0)
+                elif env_token and env_ct0:
+                    set_twitter_auth(auth_token=env_token, ct0=env_ct0)
+                else: 
+                    return {"error": "Twitter authentication required. Please provide auth_token and ct0 parameters."}
+                
+                results = df_to_json(search_tweets(q, limit=limit))
+                
+                if env_token and env_ct0:
+                    set_twitter_auth(auth_token=env_token, ct0=env_ct0)
+                else:
+                    clear_twitter_auth()
+                    
+                return results
+            except Exception as e:
+                return {"error": f"Twitter Search Failed: {str(e)}"}
+
+    return get_cached_realtime(f"TWITTER_{q}_{limit}_{auth_token is not None}", fetch)
+
 @app.get("/search")
 def global_search(q: str):
     def fetch(): return df_to_json(market.search_companies(q))
