@@ -501,11 +501,21 @@ def get_fund_estimated_return(request: Request, code: str):
         }
     return get_cached_realtime(f"FUND_EST_{code}", fetch)
 
-@app.get("/funds/screener")
-def tefas_screener(category: Optional[str] = None):
+@app.get("/funds/list")
+def list_funds(fund_type: str = "YAT"):
+    """
+    Returns a complete list of all active funds from TEFAS (v1.0.8).
+    Default fund_type is 'YAT' (Yatırım Fonu). Use 'EYF' for Pension Funds.
+    """
     def fetch():
-        return df_to_json(screen_funds(category=category))
-    return get_cached_market(f"FUND_SCREENER_{category}", fetch)
+        return df_to_json(screen_funds(fund_type=fund_type))
+    return get_cached_static(f"FUNDS_LIST_{fund_type}", fetch)
+
+@app.get("/funds/screener")
+def tefas_screener(fund_type: str = "YAT"):
+    def fetch():
+        return df_to_json(screen_funds(fund_type=fund_type))
+    return get_cached_market(f"FUND_SCREENER_{fund_type}", fetch)
 
 # --- ENDPOINTS: MARKET INSIGHTS (Ultra-Pro) ---
 
