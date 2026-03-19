@@ -212,6 +212,34 @@ def df_to_json(df: pd.DataFrame) -> List[Dict[str, Any]]:
     # Clean Info for JSON safely using pandas' built-in to_json which handles NaNs as nulls
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
+# --- LIGHTWEIGHT SENTIMENT ENGINE (v1.1.0) ---
+FINANCIAL_KEYWORDS = {
+    "positive": ["tavan", "yükseliş", "alım", "rekor", "kar", "büyüme", "temettü", "pozitif", "destek", "hedef", "bullish", "buy", "profit", "growth", "dividend"],
+    "negative": ["taban", "düşüş", "satış", "zarar", "negatif", "direnç", "risk", "ayı", "bearish", "sell", "loss", "risk", "warning", "crash"]
+}
+
+def analyze_sentiment(text_list: List[str]) -> Dict[str, Any]:
+    if not text_list: return {"score": 0, "label": "NEUTRAL", "confidence": 0}
+    
+    total_score = 0
+    mentions = 0
+    for text in text_list:
+        text = text.lower()
+        pos = sum(1 for word in FINANCIAL_KEYWORDS["positive"] if word in text)
+        neg = sum(1 for word in FINANCIAL_KEYWORDS["negative"] if word in text)
+        total_score += (pos - neg)
+        mentions += (pos + neg)
+    
+    score = round(total_score / len(text_list), 2) if text_list else 0
+    label = "BULLISH" if score > 0.1 else ("BEARISH" if score < -0.1 else "NEUTRAL")
+    
+    return {
+        "score": score,
+                "label": label,
+        "mentions_detected": mentions,
+        "sample_count": len(text_list)
+    }
+
 # --- STARTUP ---
 @app.on_event("startup")
 async def startup_event():
@@ -372,6 +400,42 @@ def stock_screener(template: Optional[str] = None):
             return {"error": str(e)}
     return get_cached_market(f"SCREENER_V2_{template}", fetch)
 
+@app.get("/stocks/{symbol}/dividends")
+def get_dividends(symbol: str):
+    symbol = symbol.upper()
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            divs = tk.dividends
+            if divs is None or divs.empty: return []
+            # Normalize column names for JSON
+            df = divs.reset_index()
+            df = df.rename(columns={"Date": "date", "Amount": "amount", "GrossRate": "gross", "NetRate": "net"})
+            return df_to_json(df)
+        except Exception:
+            return [] # Fail gracefully if provider has data issues
+    return get_cached_static(f"DIVS_{symbol}", fetch)
+
+@app.get("/stocks/{symbol}/financials")
+def get_financials(symbol: str, type: str = "income"):
+    """
+    Returns financial statements: 'income', 'balance', 'cash' (v1.1.0).
+    """
+    symbol = symbol.upper()
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            if type == "balance": df = tk.balance_sheet
+            elif type == "cash": df = tk.cash_flow
+            else: df = tk.income_stmt
+            
+            if df is None or df.empty: return {"error": "No data"}
+            # Financials are complex, simplify
+            return json.loads(df.to_json(date_format="iso"))
+        except Exception:
+            return {"error": "Financial data currently unavailable"}
+    return get_cached_static(f"FIN_{symbol}_{type}", fetch)
+
 @app.get("/analysis/{symbol}")
 def get_analysis_pro(symbol: str):
     symbol = symbol.upper()
@@ -381,13 +445,49 @@ def get_analysis_pro(symbol: str):
         if df.empty: return {"error": "No history"}
         rsi = technical.calculate_rsi(df).iloc[-1]
         supertrend = technical.calculate_supertrend(df).iloc[-1]
+        
+        # Add simpler signals
+        ma50 = df['Close'].rolling(50).mean().iloc[-1]
+        ma200 = df['Close'].rolling(200).mean().iloc[-1]
+        current = df['Close'].iloc[-1]
+        
         return {
             "symbol": symbol,
             "rsi": round(rsi, 2) if not np.isnan(rsi) else None,
             "supertrend": round(supertrend["Supertrend"], 2) if "Supertrend" in supertrend else None,
-            "signal": "BUY" if rsi < 35 else ("SELL" if rsi > 70 else "NEUTRAL")
+            "ma_comparison": {
+                "ma50": round(ma50, 2),
+                "ma200": round(ma200, 2),
+                "trend": "BULLISH" if ma50 > ma200 else "BEARISH",
+                "price_vs_ma50": "ABOVE" if current > ma50 else "BELOW"
+            },
+            "signal": "STRONG BUY" if rsi < 30 and current > ma200 else ("BUY" if rsi < 35 else ("SELL" if rsi > 70 else "NEUTRAL"))
         }
     return get_cached_market(f"ANALYSIS_PRO_{symbol}", fetch)
+
+@app.get("/analysis/{symbol}/sentiment")
+def get_sentiment_analysis(symbol: str):
+    """
+    Scrapes Twitter/X for the symbol and applies AI Sentiment scoring (v1.1.0).
+    """
+    def fetch():
+        try:
+            # Re-use existing search logic internally
+            with twitter_lock:
+                env_token = os.getenv("TWITTER_AUTH_TOKEN")
+                env_ct0 = os.getenv("TWITTER_CT0")
+                if env_token and env_ct0:
+                    set_twitter_auth(auth_token=env_token, ct0=env_ct0)
+                    tweets_df = search_tweets(symbol, limit=15)
+                    if tweets_df.empty: return {"error": "No tweets found for sentiment"}
+                    
+                    texts = tweets_df['text'].tolist()
+                    analysis = analyze_sentiment(texts)
+                    return {"symbol": symbol, "sentiment": analysis}
+                return {"error": "Twitter Auth missing for sentiment engine"}
+        except Exception as e:
+            return {"error": str(e)}
+    return get_cached_market(f"SENTIMENT_{symbol}", fetch)
 
 # --- ENDPOINTS: FUNDS ---
 
@@ -595,6 +695,19 @@ def get_tcmb_rates():
         except Exception as e:
             return {"error": f"TCMB Provider Error: {str(e)}"}
     return get_cached_static("TCMB_RATES", fetch)
+
+@app.get("/market/economy/calendar")
+def get_economic_calendar(scope: str = "today"):
+    """
+    Returns upcoming global and local economic events: 'today', 'week', 'month' (v1.1.0).
+    """
+    def fetch():
+        cal = EconomicCalendar()
+        if scope == "week": df = cal.this_week()
+        elif scope == "month": df = cal.this_month()
+        else: df = cal.today()
+        return df_to_json(df)
+    return get_cached_market(f"CALENDAR_{scope}", fetch)
 
 # --- ENDPOINTS: VIOP ---
 @app.get("/viop/list")

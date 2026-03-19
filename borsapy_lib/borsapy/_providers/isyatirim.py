@@ -1,7 +1,7 @@
 """İş Yatırım provider for real-time prices and financial statements."""
 
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -402,9 +402,9 @@ class IsYatirimProvider(BaseProvider):
                 # Parse date from timestamp (milliseconds) - strip time
                 timestamp = item.get("SHHE_TARIH", 0)
                 if timestamp:
-                    dt = datetime.fromtimestamp(timestamp / 1000).replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
+                    dt = datetime(1970, 1, 1) + timedelta(milliseconds=timestamp)
+                    dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
                 else:
                     continue
 
