@@ -113,35 +113,43 @@ def parse_fund_holdings_no_llm(fund_code: str):
         pdf_data = data[pdf_start:]
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         text = ""
+        for page in doc:
+            text += page.get_text()
         for page in doc: text += page.get_text()
         print(f"DEBUG: PDF text extracted, length: {len(text)}")
         
         # 5. Extract Stocks & Weights
         print(f"DEBUG: Starting Regex scan for holdings...")
-        # Optimized regex: Avoid re.DOTALL with deep backtracking
-        # We look for a ticker, then a short gap, then the weight
-        # Tickers are 4-5 chars, followed by some text, then Weight (e.g. 1,23)
         unique_stocks = {}
         
-        # Use a more constrained local search
-        # Matches: TICKER ... gap (max 200 chars) ... Weight
-        # We find all symbols first
+        from borsapy import market
+        try:
+            bist_tickers = set(market.companies()['ticker'].tolist())
+        except:
+            bist_tickers = set()
+            
         all_symbols = re.findall(r'\n([A-Z]{4,5})\s*\n', text)
         for sym in all_symbols:
-            if sym in ['BIST', 'PORT', 'TURK', 'TOPL', 'FTD', 'FPD', 'ISIN']: continue
+            if not bist_tickers or sym not in bist_tickers: continue
             
-            # Find the weight appearing AFTER the symbol in the text
-            # We look for the first %-like number after the symbol
             sym_pos = text.find(sym)
             if sym_pos == -1: continue
             
             search_window = text[sym_pos:sym_pos+300]
-            # Match Turkish number like 1,23 or 0,45
-            weight_match = re.search(r'(\d+,\d{2})', search_window)
+            
+            # Robust KAP PDR table matcher
+            weight_match = re.search(r'(\d+,\d{2})\s*\n\s*(\d+,\d{2})\s*\n\s*(?:TL|TRY|USD|EUR)', search_window)
             if weight_match:
+                val = weight_match.group(1) # FPD (Fund Portfolio Value)
+            else:
+                # Fallback: check all numbers, skip huge values (like share counts), get a realistic %
+                nums = re.findall(r'(\d+,\d{2})', search_window)
+                val = next((n for n in reversed(nums) if 0.01 <= float(n.replace(',', '.')) <= 40.0), None)
+                
+            if val:
                 try:
-                    weight = float(weight_match.group(1).replace(',', '.'))
-                    if 0.05 <= weight <= 15:
+                    weight = float(val.replace(',', '.'))
+                    if 0.05 <= weight <= 40:
                         unique_stocks[sym] = max(unique_stocks.get(sym, 0), weight)
                 except: continue
         
