@@ -1,54 +1,77 @@
 # 📊 BorsaPy Ultimate API (v1.0.7 - Performance Edition)
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green)
-![Status](https://img.shields.io/badge/Status-Ultra--Fast-success)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green?style=for-the-badge&logo=fastapi&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Ultrafast-success?style=for-the-badge)
 
 **BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP, Fonlar ve Makroekonomik verileri milisaniyeler içinde sunan, **yüksek performanslı ve simülasyon yetenekli** bir finansal ağ geçididir.
 
-Bu sürüm (v1.0.7), veri çekme hızını optimize eden **Katmanlı Önbellek (Layered Cache)** ve ileri düzey **Emir Derinliği Simülasyonu** ile donatılmıştır.
+Bu sürüm (v1.0.7), veri çekme hızını optimize eden **Katmanlı Önbellek (Layered Cache)**, ileri düzey **Fon İçerik Analizi (Deep Scan)** ve **Dinamik Twitter Oturumu** desteği ile donatılmıştır.
 
 ---
 
-## 🔥 v1.0.7 Yenilikleri
+## 🔥 v1.0.7 Pro Özellikler
 
 *   **⚡ Katmanlı Önbellek (Smart Cache):** Veriler oynaklıklarına göre 10sn, 60sn ve 24saatlik havuzlarda saklanarak gecikme (latency) minimize edildi.
-*   **📊 `/stocks/{symbol}/depth` (Simüle Emir Derinliği):** Gerçek zamanlı borsa tahtasını taklit eden "Volume-at-Price" algoritması eklendi.
-*   **🛡️ Bloklanma Koruması:** Veri sağlayıcılardan (İş Yatırım, KAP vb.) bloklanmayı önleyen akıllı istek yönetimi ve hata yakalama sistemi.
-*   **🏢 KAP Şirket Detayları:** Hisse sorgularına otomatik olarak şirket sektör, pazar ve faaliyet özeti eklendi.
+*   **📡 Fon Derin Tarama (Deep Scan):** `/funds/{code}/estimated-return` uç noktası artık fonun **KAP üzerindeki gerçek portföy dağılımını (PDF)** okuyarak, içindeki hisselerin anlık performansına göre tahmin üretir.
+*   **📊 Market Breadth (Piyasa Genişliği):** Borsada yükselen/düşen hisse oranlarını (A/D Ratio) anlık hesaplar.
+*   **🐦 Dinamik Twitter Auth:** API kullanıcıları artık kendi `auth_token` ve `ct0` bilgilerini göndererek kendi limitleriyle sosyal arama yapabilirler.
+*   **🔥 Isı Haritası (Heatmap):** Sektörel performansları ve hacim şampiyonlarını gruplayan yeni veri motoru.
 
 ---
 
 ## 📡 API Uç Noktaları (Endpoints)
 
-| Metod | Uç Nokta (Endpoint) | Açıklama |
+### 📈 Hisse Senedi & Analiz
+| Metod | Uç Nokta | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/stocks/{symbol}` | Hisse fiyat, oranlar ve **KAP şirket detayları**. |
-| `GET` | `/stocks/{symbol}/depth` | Simüle edilmiş "Emir Tahtası / Derinlik" verisi. |
-| `GET` | `/stocks/{symbol}/disclosures` | Güncel KAP haberleri ve bildirim linkleri. |
-| `GET` | `/funds/{code}/estimated-return` | **ELİT:** Fonun o günkü **tahmini getirisini** hesaplar. |
-| `GET` | `/funds/screener` | TEFAS Fon tarama ve kategorik listeleme. |
-| `GET` | `/analysis/{symbol}` | **Pro Analiz:** RSI, Supertrend ve Sinyal üretimi. |
-| `GET` | `/market/screener` | Gelişmiş hisse tarama ve filtreleme motoru. |
-| `GET` | `/viop/list` | VIOP kontratları (Hisse, Endeks, Döviz vadeli). |
-| `GET` | `/market/economy/inflation` | Güncel Enflasyon (TÜFE/ÜFE) özet verisi. |
-| `GET` | `/market/tax` | Yatırım araçları güncel stopaj (vergi) oranları. |
-| `GET` | `/search/tweets` | Twitter/X sosyal duyarlılık araması. |
-| `GET` | `/search` | Global arama (Hisse, Fon, VIOP). |
+| `GET` | `/stocks/{symbol}` | Anlık fiyat, oranlar ve **KAP şirket detayları**. |
+| `GET` | `/stocks/{symbol}/depth` | Simüle edilmiş **Volume-Profile** bazlı derinlik verisi. |
+| `GET` | `/stocks/{symbol}/history` | Geçmiş fiyat verileri (O-H-L-C-V). |
+| `GET` | `/analysis/{symbol}` | **Teknik Sinyal:** RSI, Supertrend ve Al/Sat durumu. |
+| `GET` | `/market/screener` | Gelişmiş filtreleme (F/K, PD/DD, Değişim). |
+
+### 💰 Fonlar (TEFAS & KAP)
+| Metod | Uç Nokta | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/funds/{code}/estimated-return` | **AMİRAL GEMİSİ:** Fonun gerçek içeriğini (PDF) analiz ederek anlık getiri tahminler. |
+| `GET` | `/funds/screener` | TEFAS kategori bazlı fon tarama. |
+| `GET` | `/funds/compare` | Birden fazla fonu karşılaştırma. |
+
+### 🌍 Piyasa & Makro (Ultra-Pro)
+| Metod | Uç Nokta | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/market/breadth` | BIST Genel Yükselen/Düşen (Advance/Decline) istatistikleri. |
+| `GET` | `/market/heatmap` | Sektörel değişim ve hacim odaklı ısı haritası verisi. |
+| `GET` | `/market/economy/inflation` | Güncel Enflasyon (TÜFE/ÜFE) özeti. |
+| `GET` | `/market/economy/rates` | TCMB güncel faiz oranları. |
+| `GET` | `/market/tax` | Yatırım araçları stopaj tablosu. |
+
+### 🔍 Sosyal & Global Arama
+| Metod | Uç Nokta | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/search/tweets` | **Dinamik:** Twitter duyarlılık araması (Opsiyonel: `auth_token`, `ct0`). |
+| `GET` | `/search` | Global varlık araması (Hisse, Fon, VIOP, Kripto). |
 
 ---
 
-## 🔐 Güvenlik ve Dağıtım
+## 🔐 Güvenlik ve Kurulum
 
-### Kurulum (Local)
-1.  `pip install -r requirements.txt`
-2.  `uvicorn main:app --reload`
+### Yerel Kurulum (Local Setup)
+```bash
+# Bağımlılıkları yükle
+pip install -r requirements.txt
 
-### Render / OnRender Dağıtımı
-1.  Ortam Değişkenlerinde `API_KEY` tanımlayın.
-2.  `TWITTER_AUTH_TOKEN` ve `TWITTER_CT0` ekleyerek sosyal aramayı aktif edin.
+# API'yi başlat
+uvicorn main:app --reload
+```
+
+### Sunucu Ayarları (Render / Docker)
+Sunucunuzda şu **Çevre Değişkenlerini (Env Vars)** tanımlayarak tam yetenekleri açabilirsiniz:
+*   `API_KEY`: Uç noktalara erişim şifreniz (`x-api-key` header).
+*   `TWITTER_AUTH_TOKEN` & `TWITTER_CT0`: Varsayılan sosyal arama hesabı.
 
 ---
 
 ## ⚠️ Yasal Uyarı
-Bu API tarafından sağlanan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi değildir.
+Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** Verilerin doğruluğu ve gecikmesinden doğacak sorumluluk kullanıcıya aittir.
