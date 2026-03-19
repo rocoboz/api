@@ -495,34 +495,29 @@ def get_market_breadth(request: Request):
     Determines if the 'Whole Market' is bullish or bearish beyond index movement.
     """
     def fetch():
-        from concurrent.futures import ThreadPoolExecutor
-        companies = market.companies()['ticker'].tolist()
-        
-        # We'll sample Top 100 stocks for speed if market breadth is requested frequently
-        # or do a full scan of all ~500 stocks in chunks
-        def get_stat(sym):
-            try:
-                ret = float(dict(Ticker(sym).fast_info).get("daily_return", 0))
-                return 1 if ret > 0.05 else (-1 if ret < -0.05 else 0)
-            except: return 0
-
-        # Limit to first 200 for breadth logic (representative sample)
-        sample = companies[:200]
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            stats = list(executor.map(get_stat, sample))
-        
-        up = stats.count(1)
-        down = stats.count(-1)
-        neutral = stats.count(0)
-        
-        return {
-            "up": up,
-            "down": down,
-            "neutral": neutral,
-            "ratio": round(up/down, 2) if down > 0 else up,
-            "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL"),
-            "sample_size": len(sample)
-        }
+        try:
+            s = screener.Screener()
+            df = s.run()
+            
+            if df.empty: return {"error": "Breadth data unavailable"}
+            
+            # criteria_5 is % Change in the default screener template
+            changes = df['criteria_5'].astype(float)
+            
+            up = int((changes > 0).sum())
+            down = int((changes < 0).sum())
+            neutral = int((changes == 0).sum())
+            
+            return {
+                "up": up,
+                "down": down,
+                "neutral": neutral,
+                "ratio": round(up/down, 2) if down > 0 else up,
+                "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL"),
+                "sample_size": len(changes)
+            }
+        except Exception as e:
+            return {"error": str(e)}
     return get_cached_realtime("MARKET_BREADTH", fetch)
 
 @app.get("/market/heatmap")
@@ -555,7 +550,7 @@ def get_tcmb_rates():
     """
     Returns latest interest rates from TCMB.
     """
-    return get_cached_static("TCMB_RATES", lambda: dict(TCMB().rates()))
+    return get_cached_static("TCMB_RATES", lambda: df_to_json(TCMB().rates))
 
 # --- ENDPOINTS: VIOP ---
 @app.get("/viop/list")
