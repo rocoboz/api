@@ -390,92 +390,89 @@ def get_fund_estimated_return(request: Request, code: str):
         
         # Market Benchmarks
         try:
-            bist = Index("XU100").info.get("daily_return", 0) / 100
+            bist = Index("XU100").info.get("change_percent", 0) / 100
         except: bist = 0
-        try:
-            usd = FX("USDTRY").info.get("daily_return", 0) / 100
-        except: usd = 0
-        try:
-            gold = (FX("XAUUSD").info.get("daily_return", 0) / 100) + usd
-        except: gold = 0
         
         daily_fixed = 0.0012
         estimate = 0.0
         details = []
         
+        # Determine total TEFAS Hisse Senedi weight
+        alloc = info.get("allocation", [])
+        tefas_hisse_weight = sum((a.get("weight", 0)/100) for a in alloc if "hisse senedi" in a.get("asset_name", "").lower())
+        
         # If we have specific holdings, use them for the "Hisse Senedi" portion
         if holdings:
-            # Sort and limit to top 15 for performance
-            holdings = sorted(holdings, key=lambda x: x['weight'], reverse=True)[:15]
-            
             stocks_total_weight = 0
             stocks_calculated_return = 0
             
-            from concurrent.futures import ThreadPoolExecutor
+            # Fetch all stock returns in 1 second using Screener
+            changes = {}
+            try:
+                from tradingview_screener import Query
+                _, df = Query().set_markets('turkey').select('name', 'change').get_scanner_data()
+                if not df.empty:
+                    changes = dict(zip(df['name'], df['change'].astype(float)))
+            except: pass
             
-            def get_stock_ret(h):
+            for h in holdings:
                 sym = h['symbol']
                 weight = h['weight'] / 100
-                try:
-                    s_info = dict(Ticker(sym).fast_info)
-                    s_ret = s_info.get("daily_return", 0) / 100
-                except: s_ret = bist
-                return {"sym": sym, "weight": weight, "ret": s_ret}
-
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                results = list(executor.map(get_stock_ret, holdings))
-            
-            for r in results:
-                contribution = r['weight'] * r['ret']
+                
+                # change is already a percentage like 5.5 for %5.5, thus divide by 100
+                s_ret = changes.get(sym, bist * 100) / 100
+                contribution = weight * s_ret
                 stocks_calculated_return += contribution
-                stocks_total_weight += r['weight']
+                stocks_total_weight += weight
+                
                 details.append({
-                    "asset": r['sym'], 
-                    "weight": round(r['weight']*100, 2), 
-                    "daily_return": round(r['ret']*100, 2),
+                    "asset": sym, 
+                    "weight": round(weight*100, 2), 
+                    "daily_return": round(s_ret*100, 2),
                     "impact": round(contribution*100, 4)
                 })
             
-            # Add other assets from general allocation (subtracting what we parsed as stocks)
-            alloc = info.get("allocation", [])
-            for asset in alloc:
-                name = asset.get("asset_name", "").lower()
-                weight = asset.get("weight", 0) / 100
-                
-                # Skip the portion we already calculated specifically
-                if "hisse senedi" in name:
-                    # If parsing found more/less stocks than TEFAS summary, we normalize
-                    continue 
-
-                impact = 0.0
-                if "döviz" in name or "eur" in name or "usd" in name: impact = usd
-                elif "altın" in name or "kıymetli" in name: impact = gold
-                elif "repo" in name or "mevduat" in name or "tahvil" in name: impact = daily_fixed
-                
-                contribution = weight * impact
-                estimate += contribution
-                details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
+            # If parsed stocks cover less than what TEFAS says, add the remainder as BIST average
+            missing_hisse_weight = max(0, tefas_hisse_weight - stocks_total_weight)
+            if missing_hisse_weight > 0.01:
+                contribution = missing_hisse_weight * bist
+                stocks_calculated_return += contribution
+                details.append({
+                    "asset": "Diğer Hisseler (BIST100 Ort.)", 
+                    "weight": round(missing_hisse_weight*100, 2), 
+                    "daily_return": round(bist*100, 2),
+                    "impact": round(contribution*100, 4)
+                })
             
             estimate += stocks_calculated_return
             mode = "Deep Scan (Specific Holdings)"
         else:
-            # Fallback to Category-based estimation
-            alloc = info.get("allocation", [])
-            if not alloc: return {"error": "Allocation data not available"}
+            mode = "Category Average (BIST100 Indexed)"
             
+        # Add other assets from general allocation
+        if alloc:
             for asset in alloc:
                 name = asset.get("asset_name", "").lower()
                 weight = asset.get("weight", 0) / 100
                 impact = 0.0
-                if "hisse senedi" in name: impact = bist
-                elif "döviz" in name or "eur" in name or "usd" in name: impact = usd
-                elif "altın" in name or "kıymetli" in name: impact = gold
-                elif "repo" in name or "mevduat" in name or "tahvil" in name: impact = daily_fixed
                 
-                contribution = weight * impact
-                estimate += contribution
-                details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
-            mode = "Category Average (BIST100 Indexed)"
+                if "hisse senedi" in name:
+                    if not holdings:
+                        impact = bist
+                    else:
+                        continue # Handled by Deep Scan
+                elif "döviz" in name or "eur" in name or "usd" in name or "yabancı" in name: 
+                    impact = daily_fixed * 2 # Proxy for fx if we can't reliably get USDTRY
+                elif "altın" in name or "kıymetli" in name: 
+                    impact = daily_fixed * 2
+                elif "repo" in name or "mevduat" in name or "tahvil" in name or "borçlanma" in name or "para piyasası" in name: 
+                    impact = daily_fixed
+                
+                # Only add if it's not hisse senedi handled by Deep Scan
+                if impact != 0.0 or not holdings or "hisse senedi" not in name:
+                    contribution = weight * impact
+                    estimate += contribution
+                    details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
 
         return {
             "fund_code": code,
@@ -483,7 +480,7 @@ def get_fund_estimated_return(request: Request, code: str):
             "calculation_mode": mode,
             "last_allocation_date": info.get("date"),
             "breakdown": details,
-            "benchmarks": {"bist100": bist*100, "usdtry": usd*100, "gold": gold*100}
+            "benchmarks": {"bist100": round(bist*100, 2), "usdtry": 0, "gold": 0}
         }
     return get_cached_realtime(f"FUND_EST_{code}", fetch)
 
