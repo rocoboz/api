@@ -23,7 +23,7 @@ except ImportError:
     HAS_RICH = False
 
 # --- CONFIGURATION ---
-BASE_URL = "https://your-render-service.onrender.com"
+BASE_URL = "http://127.0.0.1:8000"
 API_KEY = "CHANGE_ME" 
 HEADERS = {"x-api-key": API_KEY}
 

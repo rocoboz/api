@@ -128,19 +128,17 @@ def parse_fund_holdings_no_llm(fund_code: str):
         except:
             bist_tickers = set()
             
-        all_symbols = re.findall(r'\n([A-Z]{4,5})\s*\n', text)
-        for sym in all_symbols:
+        for match in re.finditer(r'\n([A-Z]{4,5})\s*\n', text):
+            sym = match.group(1)
             if not bist_tickers or sym not in bist_tickers: continue
             
-            sym_pos = text.find(sym)
-            if sym_pos == -1: continue
-            
+            sym_pos = match.end()
             search_window = text[sym_pos:sym_pos+300]
             
             # Robust KAP PDR table matcher
             weight_match = re.search(r'(\d+,\d{2})\s*\n\s*(\d+,\d{2})\s*\n\s*(?:TL|TRY|USD|EUR)', search_window)
             if weight_match:
-                val = weight_match.group(1) # FPD (Fund Portfolio Value)
+                val = weight_match.group(2) # FTD (Fund Total Value - Net Asset Weight) avoids >100%
             else:
                 # Fallback: check all numbers, skip huge values (like share counts), get a realistic %
                 nums = re.findall(r'(\d+,\d{2})', search_window)
@@ -211,9 +209,8 @@ def get_cached_static(key: str, func):
 # --- UTILS ---
 def df_to_json(df: pd.DataFrame) -> List[Dict[str, Any]]:
     if df is None or (hasattr(df, 'empty') and df.empty): return []
-    # Clean NaN/Inf for JSON
-    df = df.replace([np.inf, -np.inf], np.nan).where(pd.notnull(df), None)
-    return df.to_dict(orient="records")
+    # Clean Info for JSON safely using pandas' built-in to_json which handles NaNs as nulls
+    return json.loads(df.to_json(orient="records", date_format="iso"))
 
 # --- STARTUP ---
 @app.on_event("startup")
@@ -251,7 +248,7 @@ def home():
     return {
         "service": "BorsaPy Ultimate API",
         "version": "1.0.7",
-        "github": "https://github.com/saidsurucu/borsapy-api",
+        "github": "https://github.com/rocoboz/api",
         "docs": "/docs"
     }
 
@@ -399,7 +396,7 @@ def get_fund_estimated_return(request: Request, code: str):
         
         # Determine total TEFAS Hisse Senedi weight
         alloc = info.get("allocation", [])
-        tefas_hisse_weight = sum((a.get("weight", 0)/100) for a in alloc if "hisse senedi" in a.get("asset_name", "").lower())
+        tefas_hisse_weight = sum((a.get("weight", 0)/100) for a in alloc if any(x in a.get("asset_name", "").lower() for x in ["hisse senedi", "stock", "equity"]))
         
         # If we have specific holdings, use them for the "Hisse Senedi" portion
         if holdings:
@@ -456,20 +453,20 @@ def get_fund_estimated_return(request: Request, code: str):
                 weight = asset.get("weight", 0) / 100
                 impact = 0.0
                 
-                if "hisse senedi" in name:
+                if any(x in name for x in ["hisse senedi", "stock", "equity"]):
                     if not holdings:
                         impact = bist
                     else:
                         continue # Handled by Deep Scan
-                elif "döviz" in name or "eur" in name or "usd" in name or "yabancı" in name: 
+                elif any(x in name for x in ["döviz", "eur", "usd", "yabancı", "fx", "foreign", "currency"]): 
                     impact = daily_fixed * 2 # Proxy for fx if we can't reliably get USDTRY
-                elif "altın" in name or "kıymetli" in name: 
+                elif any(x in name for x in ["altın", "kıymetli", "gold", "precious"]): 
                     impact = daily_fixed * 2
-                elif "repo" in name or "mevduat" in name or "tahvil" in name or "borçlanma" in name or "para piyasası" in name: 
+                elif any(x in name for x in ["repo", "mevduat", "tahvil", "borçlanma", "para piyasası", "deposit", "bond", "bill", "money market", "paper"]): 
                     impact = daily_fixed
                 
                 # Only add if it's not hisse senedi handled by Deep Scan
-                if impact != 0.0 or not holdings or "hisse senedi" not in name:
+                if impact != 0.0 or not holdings or not any(x in name for x in ["hisse senedi", "stock", "equity"]):
                     contribution = weight * impact
                     estimate += contribution
                     details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
