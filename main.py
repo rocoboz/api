@@ -183,10 +183,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- CACHING SYSTEM (v1.0.7 Optimized) ---
-REALTIME_CACHE = TTLCache(maxsize=500, ttl=10) # Price, Depth (10s)
+# --- CACHING SYSTEM (v1.0.7 Optimized & Ban-Proof) ---
+REALTIME_CACHE = TTLCache(maxsize=500, ttl=30) # Price, Depth (30s - Safer for Ban Protection)
 MARKET_CACHE = TTLCache(maxsize=200, ttl=60) # Screener, VIOP (60s)
-STATIC_CACHE = TTLCache(maxsize=1000, ttl=86400) # Info, Tax, Inflation (24h)
+STATIC_CACHE = TTLCache(maxsize=1000, ttl=86400) # Info, Tax, Inflation, KAP (24h)
 
 def get_cached_realtime(key: str, func):
     if key in REALTIME_CACHE: return REALTIME_CACHE[key]
@@ -268,11 +268,14 @@ def get_stock(symbol: str):
         except:
             info = dict(tk.info)
             
-        # Add KAP Details
-        try:
-            kap = get_kap_provider()
-            info['details'] = kap.get_company_details(symbol)
-        except: info['details'] = {}
+        # Add KAP Details (CACHED STATICALLY FOR 24H)
+        def fetch_kap():
+            try:
+                kap = get_kap_provider()
+                return kap.get_company_details(symbol)
+            except: return {}
+            
+        info['details'] = get_cached_static(f"KAP_DETAILS_{symbol}", fetch_kap)
         return {"symbol": symbol, "data": info}
     return get_cached_market(f"STOCK_{symbol}", fetch)
 
@@ -371,30 +374,29 @@ def get_analysis_pro(symbol: str):
 # --- ENDPOINTS: FUNDS ---
 
 @app.get("/funds/{code}/estimated-return")
-@limiter.limit("20/minute")
+@limiter.limit("10/minute")
 def get_fund_estimated_return(request: Request, code: str):
     """
-    Calculates estimated daily return based on latest allocation and market prices.
-    v1.0.7 - Deep Scan Integration (No-LLM)
+    Calculates the real-time daily return estimate of a fund by deep-scanning its PDR PDF (v1.0.7).
     """
     code = code.upper()
     def fetch():
         f = Fund(code)
         info = f.info
         
-        # 1. Try Deep Parsing (Specific Holdings) - Cache for 24h
-        holdings = get_cached_static(f"DEEP_HOLDINGS_{code}", lambda: parse_fund_holdings_no_llm(code))
+        # 1. Parsing holdings (CACHED STATICALLY FOR 24H TO PREVENT KAP BANS)
+        holdings = get_cached_static(f"HOLDINGS_SCAN_{code}", lambda: parse_fund_holdings_no_llm(code))
         
-        # Market Benchmarks
+        # 2. Daily benchmark reference
         try:
             bist = Index("XU100").info.get("change_percent", 0) / 100
         except: bist = 0
         
-        daily_fixed = 0.0012
+        daily_fixed = 0.0012 # 0.12% daily proxy for cash/repo/fixed
         estimate = 0.0
         details = []
-        
-        # Determine total TEFAS Hisse Senedi weight
+        mode = ""
+      # Determine total TEFAS Hisse Senedi weight
         alloc = info.get("allocation", [])
         tefas_hisse_weight = sum((a.get("weight", 0)/100) for a in alloc if any(x in a.get("asset_name", "").lower() for x in ["hisse senedi", "stock", "equity"]))
         
