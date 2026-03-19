@@ -1,0 +1,2 @@
+[console_scripts]
+borsapy = borsapy.cli:main

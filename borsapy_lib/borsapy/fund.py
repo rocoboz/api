@@ -9,9 +9,10 @@ import pandas as pd
 from borsapy._providers.tefas import get_tefas_provider
 from borsapy.exceptions import DataNotAvailableError
 from borsapy.technical import TechnicalMixin
+from borsapy.twitter import TwitterMixin, _build_fund_query
 
 
-class Fund(TechnicalMixin):
+class Fund(TechnicalMixin, TwitterMixin):
     """
     A yfinance-like interface for mutual fund data from TEFAS.
 
@@ -49,6 +50,14 @@ class Fund(TechnicalMixin):
         self._provider = get_tefas_provider()
         self._info_cache: dict[str, Any] | None = None
         self._detected_fund_type: str | None = None
+
+    def _get_tweet_query(self) -> str:
+        name = None
+        try:
+            name = self.info.get("name")
+        except Exception:
+            pass
+        return _build_fund_query(self._fund_code, name)
 
     @property
     def fund_code(self) -> str:
@@ -173,6 +182,105 @@ class Fund(TechnicalMixin):
             "return_3y": info.get("return_3y"),
             "return_5y": info.get("return_5y"),
         }
+
+    @property
+    def management_fee(self) -> dict[str, Any]:
+        """
+        Get management fee information for this fund.
+
+        Returns:
+            Dictionary with keys:
+            - applied_fee: Applied annual management fee (%)
+            - prospectus_fee: Prospectus management fee (%)
+            - max_expense_ratio: Maximum total expense ratio (%)
+            - annual_return: Annual return (%)
+
+        Examples:
+            >>> fund = bp.Fund("AAK")
+            >>> fund.management_fee
+            {'applied_fee': 1.0, 'prospectus_fee': 2.2, 'max_expense_ratio': 3.65, 'annual_return': 45.5}
+        """
+        empty = {
+            "applied_fee": None,
+            "prospectus_fee": None,
+            "max_expense_ratio": None,
+            "annual_return": None,
+        }
+
+        try:
+            fees_list = self._provider.get_management_fees(fund_type=self.fund_type)
+        except Exception:
+            return empty
+
+        for item in fees_list:
+            if item.get("fund_code") == self._fund_code:
+                return {
+                    "applied_fee": item.get("applied_fee"),
+                    "prospectus_fee": item.get("prospectus_fee"),
+                    "max_expense_ratio": item.get("max_expense_ratio"),
+                    "annual_return": item.get("annual_return"),
+                }
+
+        return empty
+
+    @property
+    def tax_category(self) -> str | None:
+        """
+        Get the tax category for this fund based on its TEFAS category.
+
+        Returns:
+            Tax category identifier string (e.g., "degisken_karma_doviz",
+            "pay_senedi_yogun"), or None if the category cannot be determined.
+
+        Examples:
+            >>> fund = bp.Fund("AAK")
+            >>> fund.tax_category
+            'borclanma_para_maden'
+        """
+        from borsapy.tax import classify_fund_tax_category
+
+        info = self.info
+        category = info.get("category", "") or ""
+        fund_name = info.get("name", "") or ""
+        return classify_fund_tax_category(category, fund_name)
+
+    def withholding_tax_rate(
+        self,
+        purchase_date: datetime | str | None = None,
+        holding_days: int | None = None,
+    ) -> float | None:
+        """
+        Get the withholding tax (stopaj) rate for this fund.
+
+        Args:
+            purchase_date: Date of fund purchase. Accepts datetime, date, or
+                          "YYYY-MM-DD" string. Defaults to today.
+            holding_days: Number of days held. Relevant for GSYF/GYF funds
+                         where >730 days qualifies for 0% rate.
+
+        Returns:
+            Tax rate as a decimal (e.g., 0.15 for 15%), or None if the
+            fund category cannot be determined.
+
+        Examples:
+            >>> fund = bp.Fund("AAK")
+            >>> fund.withholding_tax_rate("2025-06-01")
+            0.15
+            >>> fund.withholding_tax_rate("2025-08-01")
+            0.175
+        """
+        from datetime import date
+
+        from borsapy.tax import get_withholding_tax_rate
+
+        cat = self.tax_category
+        if cat is None:
+            return None
+        if purchase_date is None:
+            purchase_date = date.today()
+        elif isinstance(purchase_date, datetime):
+            purchase_date = purchase_date.date()
+        return get_withholding_tax_rate(cat, purchase_date, holding_days)
 
     @property
     def allocation(self) -> pd.DataFrame:
@@ -594,3 +702,38 @@ def compare_funds(fund_codes: list[str]) -> dict[str, Any]:
     """
     provider = get_tefas_provider()
     return provider.compare_funds(fund_codes)
+
+
+def management_fees(
+    fund_type: str = "YAT",
+    founder: str | None = None,
+) -> pd.DataFrame:
+    """
+    Get management fee data for all funds.
+
+    Args:
+        fund_type: Fund type filter:
+            - "YAT": Investment Funds (Yatırım Fonları) - default
+            - "EMK": Pension Funds (Emeklilik Fonları)
+        founder: Filter by founder company code (e.g., "AKP", "GPY")
+
+    Returns:
+        DataFrame with columns: fund_code, name, fund_category, founder_code,
+        applied_fee, prospectus_fee, max_expense_ratio, annual_return.
+
+    Examples:
+        >>> import borsapy as bp
+        >>> df = bp.management_fees()
+        >>> df = bp.management_fees(fund_type="EMK")
+        >>> df = bp.management_fees(founder="AKP")
+    """
+    provider = get_tefas_provider()
+    results = provider.get_management_fees(fund_type=fund_type, founder=founder)
+
+    if not results:
+        return pd.DataFrame(columns=[
+            "fund_code", "name", "fund_category", "founder_code",
+            "applied_fee", "prospectus_fee", "max_expense_ratio", "annual_return",
+        ])
+
+    return pd.DataFrame(results)

@@ -106,6 +106,26 @@ class TEFASProvider(BaseProvider):
     def __init__(self):
         super().__init__(verify=False)
 
+    @staticmethod
+    def _parse_turkish_decimal(value: str | None) -> float | None:
+        """Parse Turkish decimal string (comma as decimal separator) to float.
+
+        Args:
+            value: Turkish decimal string (e.g., "2,2" for 2.2), None, or "0".
+
+        Returns:
+            Float value or None if input is None/empty/invalid.
+        """
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            return float(value.replace(",", "."))
+        except (ValueError, TypeError):
+            return None
+
     def get_fund_detail(self, fund_code: str, fund_type: str = "YAT") -> dict[str, Any]:
         """
         Get detailed information about a fund.
@@ -800,6 +820,68 @@ class TEFASProvider(BaseProvider):
 
         except Exception as e:
             raise APIError(f"Failed to search funds: {e}") from e
+
+    def get_management_fees(
+        self,
+        fund_type: str = "YAT",
+        founder: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get management fee data for funds.
+
+        Args:
+            fund_type: Fund type - "YAT" for investment funds, "EMK" for pension funds.
+            founder: Filter by founder company code (e.g., "AKP", "GPY").
+
+        Returns:
+            List of dicts with keys: fund_code, name, fund_category, founder_code,
+            applied_fee, prospectus_fee, max_expense_ratio, annual_return.
+        """
+        try:
+            url = f"{self.BASE_URL}/BindComparisonManagementFees"
+
+            data = {
+                "fontip": fund_type,
+                "sfontur": "",
+                "kurucukod": founder or "",
+                "fongrup": "",
+                "fonturkod": "",
+                "fonunvantip": "",
+                "islemdurum": "1",
+            }
+
+            headers = {
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Origin": "https://www.tefas.gov.tr",
+                "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
+                "User-Agent": self.DEFAULT_HEADERS["User-Agent"],
+                "X-Requested-With": "XMLHttpRequest",
+            }
+
+            response = self._client.post(url, data=data, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+
+            all_funds = result.get("data", []) if isinstance(result, dict) else result
+
+            funds = []
+            for fund in all_funds:
+                funds.append({
+                    "fund_code": fund.get("FONKODU", ""),
+                    "name": fund.get("FONUNVAN", ""),
+                    "fund_category": fund.get("FONTURACIKLAMA", ""),
+                    "founder_code": fund.get("KURUCUKODU", ""),
+                    "applied_fee": self._parse_turkish_decimal(fund.get("UYGULANANYU1Y")),
+                    "prospectus_fee": self._parse_turkish_decimal(fund.get("FONICTUZUKYU1G")),
+                    "max_expense_ratio": self._parse_turkish_decimal(fund.get("FONTOPGIDERKESORAN")),
+                    "annual_return": fund.get("YILLIKGETIRI"),
+                })
+
+            return funds
+
+        except Exception as e:
+            raise APIError(f"Failed to fetch management fees: {e}") from e
 
 
 # Singleton

@@ -1,447 +1,588 @@
+import os
+import sys
 import json
 import asyncio
-import sys
-import os
+import httpx
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any, Union
+from zoneinfo import ZoneInfo
 
-# --- THIRD PARTY LIBRARIES ---
+# --- PATH SETUP ---
+base_dir = os.path.dirname(os.path.abspath(__file__))
+lib_path = os.path.join(base_dir, 'borsapy_lib')
+if os.path.exists(lib_path):
+    sys.path.insert(0, lib_path)
+
+# --- THIRD PARTY ---
+from fastapi import FastAPI, HTTPException, Query, Request, Security, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from cachetools import TTLCache
 
-# --- PATH SETUP & DEBUGGING ---
-# Determine absolute paths
-base_dir = os.path.dirname(os.path.abspath(__file__))
-lib_dir_name = 'borsapy_lib'
-lib_path = os.path.join(base_dir, lib_dir_name)
+# --- BORSAPY IMPORTS ---
+import re
+try:
+    import fitz # PyMuPDF
+except ImportError:
+    fitz = None
 
-# Check library directory
-if not os.path.exists(lib_path):
-    print(f"CRITICAL ERROR: Library path does not exist: {lib_path}")
-
-# Add to sys.path
-sys.path.insert(0, lib_path)
-
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request, Security, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader
-import pandas as pd
-import numpy as np
-import httpx
-
-# Borsapy imports
 try:
     from borsapy import Ticker, FX, Crypto, Fund, Index, Bond, Eurobond
-    from borsapy import market, technical, screener, crypto_pairs, EconomicCalendar
-    from borsapy.stream import TradingViewStream
+    from borsapy import market, technical, screener, EconomicCalendar
+    from borsapy import Inflation, TCMB, VIOP, Portfolio, tax
+    from borsapy import search_funds, screen_funds, compare_funds
+    from borsapy.twitter import search_tweets
+    from borsapy._providers.kap import get_kap_provider
+    from borsapy._providers.kap_holdings import get_kap_holdings_provider
 except ImportError as e:
-    print(f"IMPORT ERROR: {e}")
-    # Don't raise here to allow app to start and show error on health check
+    print(f"CRITICAL IMPORT ERROR: {e}")
     pass
 
+# --- DEEP HOLDINGS PARSER (No-LLM Mode) ---
+def parse_fund_holdings_no_llm(fund_code: str):
+    """
+    Scrapes KAP for the latest PDR PDF and extracts symbols/weights using Regex (v1.0.7).
+    """
+    fund_code = fund_code.upper()
+    try:
+        # 1. Get Fund OID from KAP
+        tefas = Fund(fund_code)
+        kap_url = tefas.info.get("kap_link")
+        if not kap_url: return None
+        
+        # Extract potential OIDs from KAP page
+        resp = httpx.get(kap_url, timeout=10)
+        oids = re.findall(r'([a-fA-F0-9]{32})', resp.text)
+        if not oids: return None
+        
+        # 2. Find latest PDR disclosure
+        # Disclosure type for PDR: 8aca490d502e34b801502e380044002b
+        pdr_type = "8aca490d502e34b801502e380044002b"
+        disclosures = None
+        
+        # Try finding the correct OID that actually returns PDRs
+        print(f"DEBUG: Found {len(set(oids))} potential OIDs for {fund_code}")
+        for fund_oid in set(oids):
+            try:
+                filter_url = f"https://kap.org.tr/tr/api/disclosure/filter/FILTERYFBF/{fund_oid}/{pdr_type}/365"
+                f_resp = httpx.get(filter_url, timeout=5)
+                if f_resp.status_code == 200:
+                    data = f_resp.json()
+                    if data:
+                        print(f"DEBUG: Found valid OID: {fund_oid}")
+                        disclosures = data
+                        break
+            except: continue
+            
+        if not disclosures: 
+            print(f"DEBUG: No PDR disclosures found for {fund_code}")
+            return None
+        
+        latest_idx = disclosures[0]["disclosureBasic"]["disclosureIndex"]
+        print(f"DEBUG: Latest PDR Index: {latest_idx}")
+        
+        # 3. Get Attachment File ID
+        disc_page = f"https://www.kap.org.tr/tr/Bildirim/{latest_idx}"
+        resp = httpx.get(disc_page, timeout=10)
+        file_id_match = re.search(r'file/download/([a-f0-9]{32})', resp.text)
+        if not file_id_match: 
+            print(f"DEBUG: File ID not found in disclosure {latest_idx}")
+            return None
+        file_id = file_id_match.group(1)
+        
+        # 4. Download and Parse PDF
+        print(f"DEBUG: Downloading PDF {file_id}")
+        pdf_url = f"https://kap.org.tr/tr/api/file/download/{file_id}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        resp = httpx.get(pdf_url, headers=headers, timeout=30)
+        data = resp.content
+        pdf_start = data.find(b"%PDF-")
+        if pdf_start == -1: 
+            print(f"DEBUG: Valid PDF header not found for {fund_code}")
+            return None
+        
+        pdf_data = data[pdf_start:]
+        doc = fitz.open(stream=pdf_data, filetype="pdf")
+        text = ""
+        for page in doc: text += page.get_text()
+        print(f"DEBUG: PDF text extracted, length: {len(text)}")
+        
+        # 5. Extract Stocks & Weights
+        print(f"DEBUG: Starting Regex scan for holdings...")
+        # Optimized regex: Avoid re.DOTALL with deep backtracking
+        # We look for a ticker, then a short gap, then the weight
+        # Tickers are 4-5 chars, followed by some text, then Weight (e.g. 1,23)
+        unique_stocks = {}
+        
+        # Use a more constrained local search
+        # Matches: TICKER ... gap (max 200 chars) ... Weight
+        # We find all symbols first
+        all_symbols = re.findall(r'\n([A-Z]{4,5})\s*\n', text)
+        for sym in all_symbols:
+            if sym in ['BIST', 'PORT', 'TURK', 'TOPL', 'FTD', 'FPD', 'ISIN']: continue
+            
+            # Find the weight appearing AFTER the symbol in the text
+            # We look for the first %-like number after the symbol
+            sym_pos = text.find(sym)
+            if sym_pos == -1: continue
+            
+            search_window = text[sym_pos:sym_pos+300]
+            # Match Turkish number like 1,23 or 0,45
+            weight_match = re.search(r'(\d+,\d{2})', search_window)
+            if weight_match:
+                try:
+                    weight = float(weight_match.group(1).replace(',', '.'))
+                    if 0.05 <= weight <= 15:
+                        unique_stocks[sym] = max(unique_stocks.get(sym, 0), weight)
+                except: continue
+        
+        return [{"symbol": s, "weight": w} for s, w in unique_stocks.items()]
+    except Exception as e:
+        print(f"Deep Parsing Error for {fund_code}: {e}")
+        return None
+
 # --- SECURITY & CONFIG ---
-API_KEY = os.getenv("API_KEY", "borsapy-mobile-secret-123")
+API_KEY = os.getenv("API_KEY", "CHANGE_ME") # Set via Render environment
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 
 async def verify_api_key(api_key: str = Security(api_key_header)):
-    """
-    Verifies the API Key. 
-    If API_KEY env var is set to 'OPEN', security is disabled.
-    Otherwise, strict checking is enforced for mobile app safety.
-    """
-    if API_KEY == "OPEN":
-        return True
-    if api_key == API_KEY:
-        return True
-    # For now, we Log warning but allow access to not break your existing Web Dashboard.
-    # In a real Production Mobile App, you would raise HTTPException(403) here.
-    return True 
+    if API_KEY == "OPEN": return True
+    if api_key and api_key == API_KEY: return True
+    raise HTTPException(status_code=403, detail="Invalid or Missing API Key")
 
 # --- APP SETUP ---
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
-    title="BorsaPy API",
-    description="Professional Financial Data API for Mobile & Web",
-    version="1.0.4"
+    title="BorsaPy Ultimate API",
+    description="Professional Financial Gateway for Turkish Markets. (v1.0.7 - Performance)",
+    version="1.0.7"
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS Configuration - Restrict this in production!
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # TODO: Change to your specific domain for better security
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def start_keep_alive():
-    async def ping_regularly():
-        # Render external URL is provided in the environment by Render itself
-        url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000") 
-        if url == "http://localhost:8000" and "RENDER" not in os.environ:
-             return # Don't self-ping in local development unless explicitly asked
-        
-        while True:
-            await asyncio.sleep(14 * 60) # Ping every 14 mins to prevent Render from sleeping
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.get(url, timeout=5.0)
-            except Exception as e:
-                print(f"Keep-alive ping failed: {e}")
-                
-    asyncio.create_task(ping_regularly())
+# --- CACHING SYSTEM (v1.0.7 Optimized) ---
+REALTIME_CACHE = TTLCache(maxsize=500, ttl=10) # Price, Depth (10s)
+MARKET_CACHE = TTLCache(maxsize=200, ttl=60) # Screener, VIOP (60s)
+STATIC_CACHE = TTLCache(maxsize=1000, ttl=86400) # Info, Tax, Inflation (24h)
 
-# --- CACHING SYSTEM (MEMORY SAFE) ---
-
-# 1. Stock Cache: High volatility, fixed TTL. 
-# Max 1000 items to prevent memory leaks.
-STOCK_CACHE = TTLCache(maxsize=1000, ttl=60)
-
-# 2. Fund Cache: Custom dynamic logic.
-# We keep it as a dict but manage size manually to prevent leaks.
-FUND_CACHE = {} 
-
-def get_turkey_time():
-    return datetime.now(ZoneInfo("Europe/Istanbul"))
-
-def get_cached_fund_data(code: str, fetch_func):
-    """
-    Dynamic caching for funds based on TEFAS update hours.
-    Memory Safe: Clears cache if it grows too large.
-    """
-    # Memory Leak Protection
-    if len(FUND_CACHE) > 1000:
-        FUND_CACHE.clear()
-        print("INFO: Fund Cache cleared to prevent memory overflow.")
-
-    now = get_turkey_time()
-    is_weekday = now.weekday() < 5
-    current_hour = now.hour
-    
-    if is_weekday and 8 <= current_hour <= 15:
-        ttl_seconds = 900 
-        cache_mode = "HOT (15m)"
-    else:
-        ttl_seconds = 14400 
-        cache_mode = "COLD (4h)"
-        
-    # Check Cache
-    if code in FUND_CACHE:
-        entry = FUND_CACHE[code]
-        age = (now - entry['timestamp']).total_seconds()
-        if age < ttl_seconds:
-            return entry['data']
-    
-    # Refetch
-    print(f"CACHE MISS (Fund): {code} | Mode: {cache_mode}")
-    data = fetch_func()
-    FUND_CACHE[code] = {'data': data, 'timestamp': now}
+def get_cached_realtime(key: str, func):
+    if key in REALTIME_CACHE: return REALTIME_CACHE[key]
+    data = func()
+    REALTIME_CACHE[key] = data
     return data
 
-def get_cached_stock_data(key: str, fetch_func, ttl_override=None):
-    """
-    Wrapper for TTLCache.
-    """
-    # If key exists and is valid, return it
-    if key in STOCK_CACHE:
-        return STOCK_CACHE[key]
-    
-    # Else fetch and store
-    print(f"CACHE MISS (Stock): {key}")
-    data = fetch_func()
-    
-    # Note: cachetools TTLCache doesn't support per-item TTL easily 
-    # without using a different cache policy or multiple caches.
-    # For simplicity/stability, we use the global TTL (60s) defined in STOCK_CACHE.
-    # If an item needs longer cache (like financials), we can put it in a separate cache 
-    # or just accept 60s for now to keep it simple.
-    # BETTER: We'll create a separate cache for long-lived items.
-    STOCK_CACHE[key] = data
+def get_cached_market(key: str, func):
+    if key in MARKET_CACHE: return MARKET_CACHE[key]
+    data = func()
+    MARKET_CACHE[key] = data
     return data
 
-# Secondary Cache for Long-lived items (Financials, Search) - 1 hour TTL
-LONG_CACHE = TTLCache(maxsize=500, ttl=3600)
-
-def get_long_cached_data(key: str, fetch_func):
-    if key in LONG_CACHE:
-        return LONG_CACHE[key]
-    data = fetch_func()
-    LONG_CACHE[key] = data
+def get_cached_static(key: str, func):
+    if key in STATIC_CACHE: return STATIC_CACHE[key]
+    data = func()
+    STATIC_CACHE[key] = data
     return data
 
-# --- Helper Functions ---
-
-def df_to_json(df: Union[pd.DataFrame, pd.Series, None]) -> Any:
-    if df is None: return None
-    if isinstance(df, pd.Series): df = df.to_frame()
-    if df.empty: return []
-    df = df.reset_index()
-    df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
-    for col in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].astype(str)
+# --- UTILS ---
+def df_to_json(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    if df is None or (hasattr(df, 'empty') and df.empty): return []
+    # Clean NaN/Inf for JSON
+    df = df.replace([np.inf, -np.inf], np.nan).where(pd.notnull(df), None)
     return df.to_dict(orient="records")
 
-# --- ENDPOINTS ---
+# --- STARTUP ---
+@app.on_event("startup")
+async def startup_event():
+    # Keep-Alive Self-Ping
+    async def ping_regularly():
+        url = os.getenv("RENDER_EXTERNAL_URL")
+        if not url: return
+        while True:
+            await asyncio.sleep(14 * 60)
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.get(f"{url}/ping", timeout=5.0)
+            except: pass
+    asyncio.create_task(ping_regularly())
+    
+    # Twitter Auth
+    T_TOKEN = os.getenv("TWITTER_AUTH_TOKEN")
+    T_CT0 = os.getenv("TWITTER_CT0")
+    if T_TOKEN and T_CT0:
+        try:
+            from borsapy import set_twitter_auth
+            set_twitter_auth(auth_token=T_TOKEN, ct0=T_CT0)
+        except: pass
+
+# --- ENDPOINTS: BASE ---
+@app.get("/ping")
+def ping(): return {"status": "ok", "time": datetime.now().isoformat()}
 
 @app.get("/")
-@limiter.limit("60/minute")
-def home(request: Request):
+def home():
     return {
-        "status": "online",
-        "service": "BorsaPy API Mobile",
-        "version": "1.0.4",
-        "security": "Rate Limited & API Key Ready"
+        "service": "BorsaPy Ultimate API",
+        "version": "1.0.7",
+        "github": "https://github.com/saidsurucu/borsapy-api",
+        "docs": "/docs"
     }
 
-# --- 1. Stocks Endpoints ---
-
+# --- ENDPOINTS: STOCKS ---
 @app.get("/stocks/list")
-@limiter.limit("30/minute")
-def get_stock_list(request: Request, authorized: bool = Depends(verify_api_key)):
-    try:
-        return get_long_cached_data("ALL_STOCKS_LIST", lambda: df_to_json(market.companies()))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def list_stocks():
+    return get_cached_static("STOCKS_LIST", lambda: df_to_json(market.companies()))
 
 @app.get("/stocks/{symbol}")
-@limiter.limit("60/minute")
-def get_stock_detail(request: Request, symbol: str, authorized: bool = Depends(verify_api_key)):
-    try:
-        def fetch():
-            tk = Ticker(symbol)
-            info = tk.fast_info if hasattr(tk, 'fast_info') else {}
-            if not info: info = tk.info if hasattr(tk, 'info') else {}
-            return {"symbol": symbol.upper(), "data": info}
-        return get_cached_stock_data(f"{symbol}_DETAIL", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Stock not found")
+def get_stock(symbol: str):
+    symbol = symbol.upper()
+    def fetch():
+        tk = Ticker(symbol)
+        # Convert FastInfo to regular dict for item assignment
+        try:
+            info = dict(tk.fast_info) if hasattr(tk, 'fast_info') else dict(tk.info)
+        except:
+            info = dict(tk.info)
+            
+        # Add KAP Details
+        try:
+            kap = get_kap_provider()
+            info['details'] = kap.get_company_details(symbol)
+        except: info['details'] = {}
+        return {"symbol": symbol, "data": info}
+    return get_cached_market(f"STOCK_{symbol}", fetch)
 
 @app.get("/stocks/{symbol}/history")
-@limiter.limit("30/minute") # Heavier endpoint
-def get_stock_history(
-    request: Request,
-    symbol: str, 
-    period: str = Query("1mo"),
-    interval: str = Query("1d"),
-    authorized: bool = Depends(verify_api_key)
-):
-    try:
-        cache_key = f"{symbol}_HIST_{period}_{interval}"
-        def fetch():
-            tk = Ticker(symbol)
-            return df_to_json(tk.history(period=period, interval=interval))
-        return get_cached_stock_data(cache_key, fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def stock_history(symbol: str, period: str = "1mo", interval: str = "1d"):
+    key = f"HIST_{symbol}_{period}_{interval}"
+    def fetch():
+        tk = Ticker(symbol)
+        return df_to_json(tk.history(period=period, interval=interval))
+    return get_cached_market(key, fetch)
 
-@app.get("/stocks/{symbol}/financials")
-@limiter.limit("20/minute")
-def get_stock_financials(request: Request, symbol: str, type: str = "balance", authorized: bool = Depends(verify_api_key)):
-    try:
-        cache_key = f"{symbol}_FIN_{type}"
-        def fetch():
-            tk = Ticker(symbol)
-            if type == "balance": return df_to_json(tk.get_balance_sheet())
-            elif type == "income": return df_to_json(tk.get_income_stmt())
-            elif type == "cashflow": return df_to_json(tk.get_cashflow())
-            return []
-        return get_long_cached_data(cache_key, fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/stocks/{symbol}/depth")
+@limiter.limit("10/minute")
+def get_simulated_depth(request: Request, symbol: str):
+    """
+    Simulates Order Flow / Depth using Volume-at-Price analysis (v1.0.7).
+    """
+    symbol = symbol.upper()
+    def fetch():
+        tk = Ticker(symbol)
+        # Fetch 1 day of 5m data
+        hist = tk.history(period="1d", interval="5m")
+        if hist.empty: return {"error": "Insufficient intraday data"}
+        
+        # Group volume by price bins
+        # We'll create roughly 20 bins across the daily range
+        low, high = hist["Low"].min(), hist["High"].max()
+        if high == low: high += 0.01
+        
+        bins = np.linspace(low, high, 20)
+        hist["PriceBin"] = pd.cut(hist["Close"], bins=bins, labels=bins[:-1])
+        
+        # Calculate Volume Profile
+        vp = hist.groupby("PriceBin")["Volume"].sum().reset_index()
+        vp = vp.dropna().sort_values("PriceBin", ascending=False)
+        
+        result = []
+        total_vol = vp["Volume"].sum()
+        for _, row in vp.iterrows():
+            result.append({
+                "price": round(float(row["PriceBin"]), 2),
+                "volume": int(row["Volume"]),
+                "weight": round((row["Volume"] / total_vol) * 100, 1)
+            })
+        return {"symbol": symbol, "simulated_depth": result, "method": "Volume-at-Price Profile"}
+    return get_cached_realtime(f"DEPTH_{symbol}", fetch)
 
-# --- 1.1 Screener (All Market Data) ---
+@app.get("/stocks/{symbol}/disclosures")
+def get_disclosures(symbol: str, limit: int = 15):
+    def fetch():
+        kap = get_kap_provider()
+        return df_to_json(kap.get_disclosures(symbol, limit))
+    return get_cached_market(f"DISC_{symbol}_{limit}", fetch)
+
+@app.get("/stocks/compare")
+def compare(symbols: str = Query(...)):
+    sym_list = [s.strip().upper() for s in symbols.split(",")]
+    def fetch():
+        res = []
+        for s in sym_list:
+            tk = Ticker(s)
+            res.append({"symbol": s, "price": tk.info.get("last_price"), "pe": tk.info.get("pe")})
+        return res
+    return get_cached_market(f"COMPARE_{symbols}", fetch)
 
 @app.get("/market/screener")
-@limiter.limit("5/minute") # Extremely heavy endpoint
-def get_market_screener(request: Request, authorized: bool = Depends(verify_api_key)):
-    """
-    Returns data for ALL stocks in BIST.
-    Includes Price, Change%, Volume, Market Cap.
-    """
-    try:
-        def fetch():
-            # Using borsapy screener to fetch all stocks with price > 0
-            # This returns a list of dictionaries directly
-            s = screener.Screener()
-            # Default filter: Price > 0 (gets everything)
-            s.add_filter("price", min=0.01)
-            # Add these specific filters so the API returns their data as well
-            s.add_filter("return_1d", min=-100, max=1000)
-            s.add_filter("volume_3m", min=0, max=100000)
-            df = s.run()
-            
-            # Select relevant columns and rename for frontend clarity
-            # 'criteria_price', 'criteria_return_1d', 'criteria_volume_3m', 'name', 'symbol'
-            # Note: Column names depend on what the screener provider returns
-            
-            # Map known columns to simpler keys
-            # Based on isyatirim_screener.py mapping:
-            # price -> 7, return_1d -> 21, volume_3m -> 26
-            
-            final_data = []
-            for _, row in df.iterrows():
-                item = {
-                    "symbol": row.get("symbol"),
-                    "name": row.get("name"),
-                    "price": row.get("criteria_7", row.get("criteria_price", 0)), # Fallback keys
-                    "change_1d": row.get("criteria_21", row.get("criteria_return_1d", 0)),
-                    "volume": row.get("criteria_26", row.get("criteria_volume_3m", 0)), # Volume is in Million USD usually
-                }
-                final_data.append(item)
-            
-            return final_data
-
-        # Cache for 60 seconds (relies on borsapy internal cache as well)
-        return get_cached_stock_data("MARKET_SCREENER_ALL", fetch)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- 2. Funds (TEFAS) ---
-
-@app.get("/funds/{code}")
-@limiter.limit("60/minute")
-def get_fund_detail(request: Request, code: str, authorized: bool = Depends(verify_api_key)):
-    try:
-        def fetch():
-            f = Fund(code)
-            return {"code": code.upper(), "data": f.info if hasattr(f, 'info') else {}}
-        return get_cached_fund_data(f"{code}_DETAIL", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.get("/funds/{code}/history")
-@limiter.limit("30/minute")
-def get_fund_history(request: Request, code: str, authorized: bool = Depends(verify_api_key)):
-    try:
-        def fetch():
-            f = Fund(code)
-            return df_to_json(f.history()) if hasattr(f, 'history') else {"error": "No history"}
-        return get_cached_fund_data(f"{code}_HIST", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- 3. FX & Indices ---
-
-@app.get("/fx/list")
-@limiter.limit("60/minute")
-def get_fx_list(request: Request):
-    return [
-        {"symbol": "USD", "name": "US Dollar"},
-        {"symbol": "EUR", "name": "Euro"},
-        {"symbol": "gram-altin", "name": "Gram Gold"},
-        {"symbol": "gumus", "name": "Silver"}
-    ]
-
-@app.get("/fx/{symbol}")
-@limiter.limit("60/minute")
-def get_fx_detail(request: Request, symbol: str):
-    try:
-        def fetch():
-            fx = FX(symbol)
-            data = {}
-            if hasattr(fx, 'bank_rates'): data['bank_rates'] = df_to_json(fx.bank_rates)
-            return {"symbol": symbol, "data": data}
-        # FX needs fast updates, stock cache (60s) is fine
-        return get_cached_stock_data(f"FX_{symbol}", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.get("/market/index/{symbol}")
-@limiter.limit("60/minute")
-def get_index_detail(request: Request, symbol: str):
-    try:
-        def fetch():
-            idx = Index(symbol)
-            return {"symbol": symbol, "history": df_to_json(idx.history(period="1mo"))}
-        return get_cached_stock_data(f"IDX_{symbol}", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.get("/bonds/{name}")
-@limiter.limit("60/minute")
-def get_bond_detail(request: Request, name: str):
-    try:
-        def fetch():
-            try:
-                b = Bond(name)
-                return {"name": name, "type": "Bond", "data": b.info if hasattr(b, 'info') else {}}
-            except:
-                eb = Eurobond(name)
-                return {"name": name, "type": "Eurobond", "data": eb.info if hasattr(eb, 'info') else {}}
-        return get_long_cached_data(f"BOND_{name}", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="Bond not found")
-
-# --- 4. Crypto & Economic Calendar ---
-
-@app.get("/crypto/list")
-@limiter.limit("60/minute")
-def get_crypto_list(request: Request):
-    return crypto_pairs()
-
-@app.get("/crypto/{symbol}")
-@limiter.limit("60/minute")
-def get_crypto_detail(request: Request, symbol: str):
-    try:
-        def fetch():
-            c = Crypto(symbol)
-            return {"symbol": symbol, "data": c.info}
-        return get_cached_stock_data(f"CRYPTO_{symbol}", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="Crypto not found")
-
-@app.get("/market/economy/calendar")
-@limiter.limit("30/minute")
-def get_economic_calendar(request: Request):
-    try:
-        def fetch():
-            cal = EconomicCalendar()
-            return df_to_json(cal.today())
-        return get_long_cached_data("ECONOMIC_CALENDAR_TODAY", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- 5. Analysis & Search ---
+def stock_screener(template: Optional[str] = None, pe_max: Optional[float] = None):
+    def fetch():
+        s = screener.Screener()
+        if pe_max: s.add_filter("pe", max=pe_max)
+        df = s.run(template=template)
+        # Simplified mapping
+        data = []
+        for _, row in df.iterrows():
+            data.append({"symbol": row.get("symbol"), "price": row.get("criteria_7"), "pe": row.get("criteria_28")})
+        return data
+    return get_cached_market(f"SCREENER_{template}_{pe_max}", fetch)
 
 @app.get("/analysis/{symbol}")
-@limiter.limit("15/minute") # Very heavy endpoint, strict limit
-def get_analysis(request: Request, symbol: str, authorized: bool = Depends(verify_api_key)):
-    try:
-        def fetch():
-            tk = Ticker(symbol)
-            df = tk.history(period="1y")
-            if df.empty: return {"error": "No data"}
-            
-            rsi = technical.calculate_rsi(df).iloc[-1] if hasattr(technical, 'calculate_rsi') else None
-            sma50 = technical.calculate_sma(df, period=50).iloc[-1] if hasattr(technical, 'calculate_sma') else None
-            sma200 = technical.calculate_sma(df, period=200).iloc[-1] if hasattr(technical, 'calculate_sma') else None
-            
-            return {
-                "symbol": symbol,
-                "last_price": df["Close"].iloc[-1],
-                "indicators": {"RSI": round(rsi, 2) if rsi else None, "SMA_50": round(sma50, 2) if sma50 else None, "SMA_200": round(sma200, 2) if sma200 else None},
-                "signal": "BUY" if rsi and rsi < 30 else ("SELL" if rsi and rsi > 70 else "NEUTRAL")
-            }
-        return get_cached_stock_data(f"ANALYSIS_{symbol}", fetch)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def get_analysis_pro(symbol: str):
+    symbol = symbol.upper()
+    def fetch():
+        tk = Ticker(symbol)
+        df = tk.history(period="1y")
+        if df.empty: return {"error": "No history"}
+        rsi = technical.calculate_rsi(df).iloc[-1]
+        supertrend = technical.calculate_supertrend(df).iloc[-1]
+        return {
+            "symbol": symbol,
+            "rsi": round(rsi, 2) if not np.isnan(rsi) else None,
+            "supertrend": round(supertrend["Supertrend"], 2) if "Supertrend" in supertrend else None,
+            "signal": "BUY" if rsi < 35 else ("SELL" if rsi > 70 else "NEUTRAL")
+        }
+    return get_cached_market(f"ANALYSIS_PRO_{symbol}", fetch)
 
+# --- ENDPOINTS: FUNDS ---
+
+@app.get("/funds/{code}/estimated-return")
+@limiter.limit("20/minute")
+def get_fund_estimated_return(request: Request, code: str):
+    """
+    Calculates estimated daily return based on latest allocation and market prices.
+    v1.0.7 - Deep Scan Integration (No-LLM)
+    """
+    code = code.upper()
+    def fetch():
+        f = Fund(code)
+        info = f.info
+        
+        # 1. Try Deep Parsing (Specific Holdings) - Cache for 24h
+        holdings = get_cached_static(f"DEEP_HOLDINGS_{code}", lambda: parse_fund_holdings_no_llm(code))
+        
+        # Market Benchmarks
+        try:
+            bist = Index("XU100").info.get("daily_return", 0) / 100
+        except: bist = 0
+        try:
+            usd = FX("USDTRY").info.get("daily_return", 0) / 100
+        except: usd = 0
+        try:
+            gold = (FX("XAUUSD").info.get("daily_return", 0) / 100) + usd
+        except: gold = 0
+        
+        daily_fixed = 0.0012
+        estimate = 0.0
+        details = []
+        
+        # If we have specific holdings, use them for the "Hisse Senedi" portion
+        if holdings:
+            # Sort and limit to top 15 for performance
+            holdings = sorted(holdings, key=lambda x: x['weight'], reverse=True)[:15]
+            
+            stocks_total_weight = 0
+            stocks_calculated_return = 0
+            
+            from concurrent.futures import ThreadPoolExecutor
+            
+            def get_stock_ret(h):
+                sym = h['symbol']
+                weight = h['weight'] / 100
+                try:
+                    s_info = dict(Ticker(sym).fast_info)
+                    s_ret = s_info.get("daily_return", 0) / 100
+                except: s_ret = bist
+                return {"sym": sym, "weight": weight, "ret": s_ret}
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                results = list(executor.map(get_stock_ret, holdings))
+            
+            for r in results:
+                contribution = r['weight'] * r['ret']
+                stocks_calculated_return += contribution
+                stocks_total_weight += r['weight']
+                details.append({
+                    "asset": r['sym'], 
+                    "weight": round(r['weight']*100, 2), 
+                    "daily_return": round(r['ret']*100, 2),
+                    "impact": round(contribution*100, 4)
+                })
+            
+            # Add other assets from general allocation (subtracting what we parsed as stocks)
+            alloc = info.get("allocation", [])
+            for asset in alloc:
+                name = asset.get("asset_name", "").lower()
+                weight = asset.get("weight", 0) / 100
+                
+                # Skip the portion we already calculated specifically
+                if "hisse senedi" in name:
+                    # If parsing found more/less stocks than TEFAS summary, we normalize
+                    continue 
+
+                impact = 0.0
+                if "döviz" in name or "eur" in name or "usd" in name: impact = usd
+                elif "altın" in name or "kıymetli" in name: impact = gold
+                elif "repo" in name or "mevduat" in name or "tahvil" in name: impact = daily_fixed
+                
+                contribution = weight * impact
+                estimate += contribution
+                details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
+            
+            estimate += stocks_calculated_return
+            mode = "Deep Scan (Specific Holdings)"
+        else:
+            # Fallback to Category-based estimation
+            alloc = info.get("allocation", [])
+            if not alloc: return {"error": "Allocation data not available"}
+            
+            for asset in alloc:
+                name = asset.get("asset_name", "").lower()
+                weight = asset.get("weight", 0) / 100
+                impact = 0.0
+                if "hisse senedi" in name: impact = bist
+                elif "döviz" in name or "eur" in name or "usd" in name: impact = usd
+                elif "altın" in name or "kıymetli" in name: impact = gold
+                elif "repo" in name or "mevduat" in name or "tahvil" in name: impact = daily_fixed
+                
+                contribution = weight * impact
+                estimate += contribution
+                details.append({"asset": asset.get("asset_name"), "weight": round(weight*100, 2), "impact": round(impact*100, 4)})
+            mode = "Category Average (BIST100 Indexed)"
+
+        return {
+            "fund_code": code,
+            "estimated_daily_return": round(estimate * 100, 3),
+            "calculation_mode": mode,
+            "last_allocation_date": info.get("date"),
+            "breakdown": details,
+            "benchmarks": {"bist100": bist*100, "usdtry": usd*100, "gold": gold*100}
+        }
+    return get_cached_realtime(f"FUND_EST_{code}", fetch)
+
+@app.get("/funds/screener")
+def tefas_screener(category: Optional[str] = None):
+    def fetch():
+        return df_to_json(screen_funds(category=category))
+    return get_cached_market(f"FUND_SCREENER_{category}", fetch)
+
+# --- ENDPOINTS: MARKET INSIGHTS (Ultra-Pro) ---
+
+@app.get("/market/breadth")
+@limiter.limit("5/minute")
+def get_market_breadth(request: Request):
+    """
+    Returns Advance/Decline ratio for the entire BIST.
+    Determines if the 'Whole Market' is bullish or bearish beyond index movement.
+    """
+    def fetch():
+        from concurrent.futures import ThreadPoolExecutor
+        companies = market.companies()['ticker'].tolist()
+        
+        # We'll sample Top 100 stocks for speed if market breadth is requested frequently
+        # or do a full scan of all ~500 stocks in chunks
+        def get_stat(sym):
+            try:
+                ret = float(dict(Ticker(sym).fast_info).get("daily_return", 0))
+                return 1 if ret > 0.05 else (-1 if ret < -0.05 else 0)
+            except: return 0
+
+        # Limit to first 200 for breadth logic (representative sample)
+        sample = companies[:200]
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            stats = list(executor.map(get_stat, sample))
+        
+        up = stats.count(1)
+        down = stats.count(-1)
+        neutral = stats.count(0)
+        
+        return {
+            "up": up,
+            "down": down,
+            "neutral": neutral,
+            "ratio": round(up/down, 2) if down > 0 else up,
+            "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL"),
+            "sample_size": len(sample)
+        }
+    return get_cached_realtime("MARKET_BREADTH", fetch)
+
+@app.get("/market/heatmap")
+def get_market_heatmap():
+    """
+    Returns Sector-based performance grouping for Heatmap visualization.
+    """
+    def fetch():
+        # Using Screener to get bulk data is more efficient than individual Tickers
+        s = screener.Screener()
+        df = s.run() # Default template has basic performance
+        
+        # Group by Sector/Industry
+        # Note: mapping depends on provider structure. We'll group by available columns.
+        if df.empty: return {"error": "Heatmap data currently unavailable"}
+        
+        heatmap = []
+        # Grouping by 'sector' if available, or just Top 50 symbols
+        for _, row in df.head(50).iterrows():
+            heatmap.append({
+                "symbol": row.get("symbol"),
+                "change": round(float(row.get("criteria_5", 0)), 2), # % Change
+                "volume": float(row.get("criteria_13", 0)) # Volume
+            })
+        return heatmap
+    return get_cached_market("MARKET_HEATMAP", fetch)
+
+@app.get("/market/economy/rates")
+def get_tcmb_rates():
+    """
+    Returns latest interest rates from TCMB.
+    """
+    return get_cached_static("TCMB_RATES", lambda: dict(TCMB().rates()))
+
+# --- ENDPOINTS: VIOP ---
+@app.get("/viop/list")
+def viop_list(category: str = "all"):
+    def fetch():
+        v = VIOP()
+        if category == "stock": return df_to_json(v.stock_futures)
+        return df_to_json(v.futures)
+    return get_cached_market(f"VIOP_LIST_{category}", fetch)
+
+# --- ENDPOINTS: MACRO ---
+@app.get("/market/economy/inflation")
+def inflation_data():
+    def fetch():
+        inf = Inflation()
+        return {"tufe": inf.latest("tufe"), "ufe": inf.latest("ufe")}
+    return get_cached_static("INFLATION", fetch)
+
+@app.get("/market/tax")
+def tax_table():
+    return get_cached_static("TAX_TABLE", lambda: df_to_json(tax.withholding_tax_table()))
+
+# --- ENDPOINTS: SEARCH ---
 @app.get("/search")
-@limiter.limit("30/minute")
-def search(request: Request, q: str):
+def global_search(q: str):
+    def fetch(): return df_to_json(market.search_companies(q))
+    return get_cached_market(f"SEARCH_{q}", fetch)
+
+@app.get("/search/tweets")
+def twitter_search(q: str, limit: int = 15):
     try:
-        return get_long_cached_data(f"SEARCH_{q}", lambda: df_to_json(market.search_companies(q)))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        def fetch(): return df_to_json(search_tweets(query=q, limit=limit))
+        return get_cached_market(f"TWEETS_{q}", fetch)
+    except: return []
 
 if __name__ == "__main__":
     import uvicorn

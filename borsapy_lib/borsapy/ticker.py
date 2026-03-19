@@ -10,6 +10,7 @@ import pandas as pd
 from borsapy._providers.kap import get_kap_provider
 from borsapy._providers.tradingview import get_tradingview_provider
 from borsapy.technical import TechnicalMixin
+from borsapy.twitter import TwitterMixin, _build_stock_query
 
 
 class FastInfo:
@@ -464,7 +465,7 @@ class EnrichedInfo:
         return result
 
 
-class Ticker(TechnicalMixin):
+class Ticker(TechnicalMixin, TwitterMixin):
     """
     A yfinance-like interface for Turkish stock data.
 
@@ -495,6 +496,9 @@ class Ticker(TechnicalMixin):
         self._isin_provider = None  # Lazy load for ISIN lookup
         self._hedeffiyat = None  # Lazy load for analyst price targets
         self._etf_provider = None  # Lazy load for ETF holders
+
+    def _get_tweet_query(self) -> str:
+        return _build_stock_query(self._symbol)
 
     def _get_isyatirim(self):
         """Lazy load İş Yatırım provider for financial statements."""
@@ -811,7 +815,10 @@ class Ticker(TechnicalMixin):
         return result
 
     def get_balance_sheet(
-        self, quarterly: bool = False, financial_group: str | None = None
+        self,
+        quarterly: bool = False,
+        financial_group: str | None = None,
+        last_n: int | str | None = None,
     ) -> pd.DataFrame:
         """
         Get balance sheet data.
@@ -820,27 +827,33 @@ class Ticker(TechnicalMixin):
             quarterly: If True, return quarterly data. If False, return annual.
             financial_group: Financial group code. Use "UFRS" for banks,
                            "XI_29" for industrial companies. If None, defaults to XI_29.
+            last_n: Number of periods to fetch. None for default (5), int for exact
+                    count (e.g. 10 = 10 annual periods), "all" for maximum available.
 
         Returns:
             DataFrame with balance sheet items as rows and periods as columns.
 
         Examples:
             >>> stock = bp.Ticker("THYAO")
-            >>> stock.get_balance_sheet()  # Annual, industrial
-            >>> stock.get_balance_sheet(quarterly=True)  # Quarterly
+            >>> stock.get_balance_sheet()  # Annual, industrial (5 periods)
+            >>> stock.get_balance_sheet(quarterly=True, last_n=20)  # 20 quarters
 
             >>> bank = bp.Ticker("AKBNK")
-            >>> bank.get_balance_sheet(financial_group="UFRS")  # Banks need UFRS
+            >>> bank.get_balance_sheet(financial_group="UFRS", last_n="all")
         """
         return self._get_isyatirim().get_financial_statements(
             symbol=self._symbol,
             statement_type="balance_sheet",
             quarterly=quarterly,
             financial_group=financial_group,
+            last_n=last_n,
         )
 
     def get_income_stmt(
-        self, quarterly: bool = False, financial_group: str | None = None
+        self,
+        quarterly: bool = False,
+        financial_group: str | None = None,
+        last_n: int | str | None = None,
     ) -> pd.DataFrame:
         """
         Get income statement data.
@@ -849,14 +862,16 @@ class Ticker(TechnicalMixin):
             quarterly: If True, return quarterly data. If False, return annual.
             financial_group: Financial group code. Use "UFRS" for banks,
                            "XI_29" for industrial companies. If None, defaults to XI_29.
+            last_n: Number of periods to fetch. None for default (5), int for exact
+                    count (e.g. 10 = 10 annual periods), "all" for maximum available.
 
         Returns:
             DataFrame with income statement items as rows and periods as columns.
 
         Examples:
             >>> stock = bp.Ticker("THYAO")
-            >>> stock.get_income_stmt()  # Annual
-            >>> stock.get_income_stmt(quarterly=True)  # Quarterly
+            >>> stock.get_income_stmt()  # Annual (5 periods)
+            >>> stock.get_income_stmt(quarterly=True, last_n=20)  # 20 quarters
 
             >>> bank = bp.Ticker("AKBNK")
             >>> bank.get_income_stmt(quarterly=True, financial_group="UFRS")
@@ -866,10 +881,14 @@ class Ticker(TechnicalMixin):
             statement_type="income_stmt",
             quarterly=quarterly,
             financial_group=financial_group,
+            last_n=last_n,
         )
 
     def get_cashflow(
-        self, quarterly: bool = False, financial_group: str | None = None
+        self,
+        quarterly: bool = False,
+        financial_group: str | None = None,
+        last_n: int | str | None = None,
     ) -> pd.DataFrame:
         """
         Get cash flow statement data.
@@ -878,23 +897,26 @@ class Ticker(TechnicalMixin):
             quarterly: If True, return quarterly data. If False, return annual.
             financial_group: Financial group code. Use "UFRS" for banks,
                            "XI_29" for industrial companies. If None, defaults to XI_29.
+            last_n: Number of periods to fetch. None for default (5), int for exact
+                    count (e.g. 10 = 10 annual periods), "all" for maximum available.
 
         Returns:
             DataFrame with cash flow items as rows and periods as columns.
 
         Examples:
             >>> stock = bp.Ticker("THYAO")
-            >>> stock.get_cashflow()  # Annual
-            >>> stock.get_cashflow(quarterly=True)  # Quarterly
+            >>> stock.get_cashflow()  # Annual (5 periods)
+            >>> stock.get_cashflow(quarterly=True, last_n=20)  # 20 quarters
 
             >>> bank = bp.Ticker("AKBNK")
-            >>> bank.get_cashflow(financial_group="UFRS")
+            >>> bank.get_cashflow(financial_group="UFRS", last_n="all")
         """
         return self._get_isyatirim().get_financial_statements(
             symbol=self._symbol,
             statement_type="cashflow",
             quarterly=quarterly,
             financial_group=financial_group,
+            last_n=last_n,
         )
 
     # Legacy property aliases for backward compatibility

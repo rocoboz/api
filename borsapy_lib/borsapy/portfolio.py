@@ -149,6 +149,7 @@ class Portfolio(TechnicalMixin):
         self._holdings: dict[str, Holding] = {}
         self._asset_cache: dict[str, Ticker | FX | Crypto | Fund] = {}
         self._benchmark = benchmark
+        self._target_weights: dict[str, float] = {}
 
     # === Asset Management ===
 
@@ -294,6 +295,230 @@ class Portfolio(TechnicalMixin):
         """
         self._benchmark = index
         return self
+
+    # === Rebalancing ===
+
+    def set_target_weights(self, weights: dict[str, float]) -> "Portfolio":
+        """Set target allocation weights for rebalancing.
+
+        Args:
+            weights: Dict of symbol -> target weight (0.0 to 1.0 scale).
+                     Must sum to approximately 1.0 (tolerance: 0.01).
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If weights don't sum to ~1.0 or contain invalid values.
+
+        Examples:
+            >>> p = Portfolio()
+            >>> p.add("THYAO", shares=100, cost=280)
+            >>> p.add("GARAN", shares=200, cost=50)
+            >>> p.set_target_weights({"THYAO": 0.60, "GARAN": 0.40})
+        """
+        total = sum(weights.values())
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(
+                f"Target weights must sum to ~1.0, got {total:.4f}"
+            )
+        for symbol, weight in weights.items():
+            if weight < 0 or weight > 1:
+                raise ValueError(
+                    f"Weight for {symbol} must be between 0.0 and 1.0, got {weight}"
+                )
+        self._target_weights = dict(weights)
+        return self
+
+    @property
+    def target_weights(self) -> dict[str, float]:
+        """Get current target allocation weights."""
+        return dict(self._target_weights)
+
+    def drift(self) -> pd.DataFrame:
+        """Calculate drift between current and target weights.
+
+        Returns:
+            DataFrame with columns:
+            - symbol: Asset symbol
+            - current_weight: Current portfolio weight (0-1 scale)
+            - target_weight: Target allocation weight (0-1 scale)
+            - drift: Absolute drift (current - target)
+            - drift_pct: Drift as percentage points
+
+        Raises:
+            ValueError: If target weights are not set.
+        """
+        if not self._target_weights:
+            raise ValueError(
+                "Target weights not set. Call set_target_weights() first."
+            )
+
+        current_weights = self.weights  # dict[str, float] on 0-1 scale
+        rows = []
+
+        # Include all symbols from both current holdings and targets
+        all_symbols = set(current_weights.keys()) | set(self._target_weights.keys())
+
+        for symbol in sorted(all_symbols):
+            current = current_weights.get(symbol, 0.0)
+            target = self._target_weights.get(symbol, 0.0)
+            drift_val = current - target
+            rows.append({
+                "symbol": symbol,
+                "current_weight": round(current, 4),
+                "target_weight": round(target, 4),
+                "drift": round(drift_val, 4),
+                "drift_pct": round(drift_val * 100, 2),
+            })
+
+        return pd.DataFrame(rows)
+
+    def rebalance_plan(self, threshold: float = 0.0) -> pd.DataFrame:
+        """Calculate trades needed to rebalance portfolio.
+
+        Args:
+            threshold: Minimum drift (0-1 scale) to trigger a trade.
+                      E.g., 0.02 = ignore drifts less than 2%.
+
+        Returns:
+            DataFrame with columns:
+            - symbol: Asset symbol
+            - current_shares: Current number of shares
+            - target_shares: Target number of shares
+            - delta_shares: Shares to buy (+) or sell (-)
+            - delta_value: Approximate trade value in TL
+            - action: "BUY", "SELL", or "HOLD"
+
+        Raises:
+            ValueError: If target weights are not set.
+        """
+        if not self._target_weights:
+            raise ValueError(
+                "Target weights not set. Call set_target_weights() first."
+            )
+
+        total_value = self.value
+        if total_value == 0:
+            return pd.DataFrame(
+                columns=["symbol", "current_shares", "target_shares",
+                         "delta_shares", "delta_value", "action"]
+            )
+
+        rows = []
+        all_symbols = set(self._holdings.keys()) | set(self._target_weights.keys())
+
+        for symbol in sorted(all_symbols):
+            holding = self._holdings.get(symbol)
+            target_weight = self._target_weights.get(symbol, 0.0)
+
+            # Get current price
+            if holding:
+                asset = self._get_or_create_asset(symbol, holding.asset_type)
+            else:
+                # Symbol in targets but not in holdings - detect type
+                detected_type = _detect_asset_type(symbol)
+                asset = self._get_or_create_asset(symbol, detected_type)
+            current_price = self._get_current_price(asset)
+
+            current_shares = holding.shares if holding else 0.0
+            current_value = current_shares * current_price
+            current_weight = current_value / total_value if total_value else 0.0
+
+            # Check threshold
+            if abs(current_weight - target_weight) < threshold:
+                rows.append({
+                    "symbol": symbol,
+                    "current_shares": current_shares,
+                    "target_shares": current_shares,
+                    "delta_shares": 0.0,
+                    "delta_value": 0.0,
+                    "action": "HOLD",
+                })
+                continue
+
+            # Calculate target shares
+            target_value = total_value * target_weight
+            if current_price > 0:
+                target_shares = target_value / current_price
+            else:
+                target_shares = 0.0
+
+            # Round stock shares to integers
+            asset_type = holding.asset_type if holding else _detect_asset_type(symbol)
+            if asset_type == "stock":
+                target_shares = round(target_shares)
+
+            delta_shares = target_shares - current_shares
+            delta_value = delta_shares * current_price
+
+            if delta_shares > 0.001:
+                action = "BUY"
+            elif delta_shares < -0.001:
+                action = "SELL"
+            else:
+                action = "HOLD"
+
+            rows.append({
+                "symbol": symbol,
+                "current_shares": current_shares,
+                "target_shares": round(target_shares, 4),
+                "delta_shares": round(delta_shares, 4),
+                "delta_value": round(delta_value, 2),
+                "action": action,
+            })
+
+        return pd.DataFrame(rows)
+
+    def rebalance(self, threshold: float = 0.0, dry_run: bool = False) -> pd.DataFrame:
+        """Execute rebalance by updating share counts.
+
+        Updates the portfolio holdings to match target weights.
+        Stock shares are rounded to integers; crypto and fund shares
+        remain fractional.
+
+        Args:
+            threshold: Minimum drift (0-1 scale) to trigger a trade.
+            dry_run: If True, return the plan without executing.
+
+        Returns:
+            DataFrame with the rebalance plan (same as rebalance_plan()).
+
+        Raises:
+            ValueError: If target weights are not set.
+        """
+        plan = self.rebalance_plan(threshold=threshold)
+
+        if dry_run or plan.empty:
+            return plan
+
+        for _, row in plan.iterrows():
+            symbol = row["symbol"]
+            action = row["action"]
+            target_shares = row["target_shares"]
+
+            if action == "HOLD":
+                continue
+
+            if symbol in self._holdings:
+                if target_shares <= 0:
+                    self.remove(symbol)
+                else:
+                    self._holdings[symbol].shares = target_shares
+            elif target_shares > 0:
+                # New holding needed
+                detected_type = _detect_asset_type(symbol)
+                asset = self._get_or_create_asset(symbol, detected_type)
+                price = self._get_current_price(asset)
+                self._holdings[symbol] = Holding(
+                    symbol=symbol,
+                    shares=target_shares,
+                    cost_per_share=price,
+                    asset_type=detected_type,
+                    purchase_date=date.today(),
+                )
+
+        return plan
 
     # === Properties ===
 
@@ -698,7 +923,7 @@ class Portfolio(TechnicalMixin):
         Returns:
             Dictionary with portfolio data.
         """
-        return {
+        result: dict[str, Any] = {
             "benchmark": self._benchmark,
             "holdings": [
                 {
@@ -711,6 +936,9 @@ class Portfolio(TechnicalMixin):
                 for h in self._holdings.values()
             ],
         }
+        if self._target_weights:
+            result["target_weights"] = dict(self._target_weights)
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Portfolio":
@@ -737,6 +965,9 @@ class Portfolio(TechnicalMixin):
                 asset_type=h.get("asset_type"),
                 purchase_date=purchase_date,
             )
+        # Restore target weights if present
+        if "target_weights" in data:
+            portfolio._target_weights = dict(data["target_weights"])
         return portfolio
 
     # === Private Methods ===

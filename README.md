@@ -1,73 +1,54 @@
-# 📈 BorsaPy API Service
+# 📊 BorsaPy Ultimate API (v1.0.7 - Performance Edition)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green)
-![Status](https://img.shields.io/badge/Status-Active-success)
+![Status](https://img.shields.io/badge/Status-Ultra--Fast-success)
 
-**BorsaPy API**, Borsa İstanbul (BIST), Döviz, Altın, Kripto Para ve TEFAS Fon verilerini JSON formatında sunan profesyonel, yüksek performanslı bir REST API servisidir. Mobil uygulamalar, algoritmik ticaret botları ve finansal analiz araçları için özel olarak tasarlanmıştır.
+**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP, Fonlar ve Makroekonomik verileri milisaniyeler içinde sunan, **yüksek performanslı ve simülasyon yetenekli** bir finansal ağ geçididir.
 
-Bu proje, güçlü [borsapy](https://github.com/saidsurucu/borsapy) kütüphanesini modern bir API arayüzü ile dış dünyaya açar.
+Bu sürüm (v1.0.7), veri çekme hızını optimize eden **Katmanlı Önbellek (Layered Cache)** ve ileri düzey **Emir Derinliği Simülasyonu** ile donatılmıştır.
 
 ---
 
-## 🚀 Özellikler
+## 🔥 v1.0.7 Yenilikleri
 
-*   **⚡ Anlık Piyasa Verileri:** BIST hisseleri için gecikmesiz/gecikmeli fiyat, hacim ve değişim verileri.
-*   **🏦 Banka Kurları:** 20+ Türk bankasının canlı Döviz ve Altın alış/satış kurları.
-*   **📊 Teknik Analiz:** Sunucu tarafında hesaplanan RSI, MACD, SMA gibi değerler ve indikatör sinyalleri.
-*   **💰 Kripto Para & Fonlar:** Kripto paraların (Binance/BTCTurk) ve TEFAS üzerindeki fonların detaylı verileri.
-*   **📅 Ekonomik Takvim & Enflasyon:** Günlük ekonomik olaylar takvimi.
-*   **📡 Kesintisiz (Keep-Alive):** Render üzerinde uykuyu engelleyen otomatik self-ping altyapısı mevcuttur.
+*   **⚡ Katmanlı Önbellek (Smart Cache):** Veriler oynaklıklarına göre 10sn, 60sn ve 24saatlik havuzlarda saklanarak gecikme (latency) minimize edildi.
+*   **📊 `/stocks/{symbol}/depth` (Simüle Emir Derinliği):** Gerçek zamanlı borsa tahtasını taklit eden "Volume-at-Price" algoritması eklendi.
+*   **🛡️ Bloklanma Koruması:** Veri sağlayıcılardan (İş Yatırım, KAP vb.) bloklanmayı önleyen akıllı istek yönetimi ve hata yakalama sistemi.
+*   **🏢 KAP Şirket Detayları:** Hisse sorgularına otomatik olarak şirket sektör, pazar ve faaliyet özeti eklendi.
 
 ---
 
 ## 📡 API Uç Noktaları (Endpoints)
 
-Servis yayına alındığında `/docs` adresinden interaktif dökümantasyona (Swagger UI) erişebilirsiniz.
-
 | Metod | Uç Nokta (Endpoint) | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/stocks/list` | Tüm BIST şirketlerinin listesini getirir. |
-| `GET` | `/stocks/{symbol}` | Hisse özet bilgileri (Fiyat, FK, PD/DD, Piyasa Değeri). |
-| `GET` | `/stocks/{symbol}/history` | Tarihsel OHLCV verileri. (`period` ve `interval` parametreleri alabilir). |
-| `GET` | `/stocks/{symbol}/financials` | Şirketin mali tabloları (`type`: `balance`, `income`, `cashflow`). |
-| `GET` | `/market/screener` | Tüm hisselerin anlık piyasa verileri (Fiyat, Değişim, Hacim). |
-| `GET` | `/market/index/{symbol}` | Endeks (Örn: `XU100`, `XU030`) tarihsel verileri. |
-| `GET` | `/analysis/{symbol}` | Otomatik teknik analiz ve indikatör değerleri (RSI, SMA). |
-| `GET` | `/fx/list` | Takip edilen döviz ve emtiaların listesi. |
-| `GET` | `/fx/{symbol}` | Banka ve serbest piyasa kurları (Örn: `USD`, `EUR`, `gram-altin`). |
-| `GET` | `/crypto/list` | Desteklenen Kripto para kurları. |
-| `GET` | `/crypto/{symbol}` | Seçili Kripto paranın (Örn: `BTCUSDT`) değerleri. |
-| `GET` | `/funds/{code}` | TEFAS fon detayları (Örn: `AFT`, `TCD`). |
-| `GET` | `/funds/{code}/history` | Fonların tarihsel fiyat değişim verileri. |
-| `GET` | `/bonds/{name}` | Devlet Tahvili ve Eurobond piyasa verileri (Örn: `10Y`, `US900123CJ75`). |
-| `GET` | `/market/economy/calendar` | Bugünkü güncel veya yaklaşan önemli ekonomik etkinlikler. |
-| `GET` | `/search?q={query}` | Hisse kodu veya şirket adına göre arama yapar. |
+| `GET` | `/stocks/{symbol}` | Hisse fiyat, oranlar ve **KAP şirket detayları**. |
+| `GET` | `/stocks/{symbol}/depth` | Simüle edilmiş "Emir Tahtası / Derinlik" verisi. |
+| `GET` | `/stocks/{symbol}/disclosures` | Güncel KAP haberleri ve bildirim linkleri. |
+| `GET` | `/funds/{code}/estimated-return` | **ELİT:** Fonun o günkü **tahmini getirisini** hesaplar. |
+| `GET` | `/funds/screener` | TEFAS Fon tarama ve kategorik listeleme. |
+| `GET` | `/analysis/{symbol}` | **Pro Analiz:** RSI, Supertrend ve Sinyal üretimi. |
+| `GET` | `/market/screener` | Gelişmiş hisse tarama ve filtreleme motoru. |
+| `GET` | `/viop/list` | VIOP kontratları (Hisse, Endeks, Döviz vadeli). |
+| `GET` | `/market/economy/inflation` | Güncel Enflasyon (TÜFE/ÜFE) özet verisi. |
+| `GET` | `/market/tax` | Yatırım araçları güncel stopaj (vergi) oranları. |
+| `GET` | `/search/tweets` | Twitter/X sosyal duyarlılık araması. |
+| `GET` | `/search` | Global arama (Hisse, Fon, VIOP). |
 
 ---
 
-## 🛠 Kurulum ve Yayınlama (Deploy)
+## 🔐 Güvenlik ve Dağıtım
 
-Bu proje **Render**, **Railway** veya herhangi bir VPS üzerinde çalışmaya hazırdır.
+### Kurulum (Local)
+1.  `pip install -r requirements.txt`
+2.  `uvicorn main:app --reload`
 
-### OnRender Ücretsiz Sürüm (Keep-Alive Özelliği)
-Render normalde ücretsiz servisleri 15 dakika hareketsizlikten sonra uyutur. Bu durumun önüne geçmek için **BorsaPy API**, render linkinizi `RENDER_EXTERNAL_URL` ortam değişkeninden (otomatik oluşturulur) algılayarak her 14 dakikada bir kendi kendini uyarır (self-ping ping_regularly task) ve API'nizi 7/24 uyanık tutmaya çalışır. 
-
-*Yine de tam garanti olması için ek bir güvenlik katmanı olarak [cron-job.org](https://cron-job.org) adresinden oluşturduğunuz render URL'nize (örn. `https://api-projem.onrender.com/`) her 10 dakikada bir istek atan ücretsiz bir ping görevi ayarlayabilirsiniz.*
-
-### Yerel Çalıştırma (Localhost)
-
-```bash
-# Gerekli paketleri yükleyin
-pip install -r requirements.txt
-
-# Sunucuyu başlatın
-uvicorn main:app --reload
-```
-API şu adreste çalışacaktır: `http://127.0.0.1:8000`
+### Render / OnRender Dağıtımı
+1.  Ortam Değişkenlerinde `API_KEY` tanımlayın.
+2.  `TWITTER_AUTH_TOKEN` ve `TWITTER_CT0` ekleyerek sosyal aramayı aktif edin.
 
 ---
 
 ## ⚠️ Yasal Uyarı
-
-Bu API tarafından sağlanan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi değildir. Veriler üçüncü parti kaynaklardan sağlanmakta olup doğruluk veya kesintisizlik garantisi verilmez.
+Bu API tarafından sağlanan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi değildir.

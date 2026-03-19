@@ -123,6 +123,13 @@ from borsapy._providers.tradingview import (
     get_tradingview_auth,
     set_tradingview_auth,
 )
+
+# Twitter/X authentication (optional, requires borsapy[twitter])
+from borsapy._providers.twitter import (
+    clear_twitter_auth,
+    get_twitter_auth,
+    set_twitter_auth,
+)
 from borsapy.backtest import Backtest, BacktestResult, Trade, backtest
 from borsapy.bond import Bond, bonds, risk_free_rate
 from borsapy.calendar import EconomicCalendar, economic_calendar
@@ -139,7 +146,7 @@ from borsapy.exceptions import (
     RateLimitError,
     TickerNotFoundError,
 )
-from borsapy.fund import Fund, compare_funds, screen_funds, search_funds
+from borsapy.fund import Fund, compare_funds, management_fees, screen_funds, search_funds
 from borsapy.fx import FX, banks, metal_institutions
 from borsapy.index import Index, all_indices, index, indices
 from borsapy.inflation import Inflation
@@ -161,6 +168,7 @@ from borsapy.search import (
 
 # TradingView streaming for real-time updates
 from borsapy.stream import TradingViewStream, create_stream
+from borsapy.tax import withholding_tax_rate, withholding_tax_table
 from borsapy.tcmb import TCMB, policy_rate
 from borsapy.technical import (
     TechnicalAnalyzer,
@@ -168,20 +176,28 @@ from borsapy.technical import (
     calculate_adx,
     calculate_atr,
     calculate_bollinger_bands,
+    calculate_dema,
     calculate_ema,
+    calculate_hhv,
+    calculate_llv,
     calculate_macd,
+    calculate_mom,
     calculate_obv,
+    calculate_roc,
     calculate_rsi,
     calculate_sma,
     calculate_stochastic,
     calculate_supertrend,
+    calculate_tema,
     calculate_tilson_t3,
     calculate_vwap,
+    calculate_wma,
 )
 from borsapy.ticker import Ticker
+from borsapy.twitter import search_tweets
 from borsapy.viop import VIOP
 
-__version__ = "0.7.3"
+__version__ = "0.8.3"
 __author__ = "Said Surucu"
 
 __all__ = [
@@ -218,6 +234,7 @@ __all__ = [
     "search_funds",
     "screen_funds",
     "compare_funds",
+    "management_fees",
     "download",
     "index",
     "indices",
@@ -255,6 +272,14 @@ __all__ = [
     "calculate_adx",
     "calculate_supertrend",
     "calculate_tilson_t3",
+    # MetaStock indicators
+    "calculate_hhv",
+    "calculate_llv",
+    "calculate_mom",
+    "calculate_roc",
+    "calculate_wma",
+    "calculate_dema",
+    "calculate_tema",
     # Charts
     "calculate_heikin_ashi",
     # Replay
@@ -281,4 +306,12 @@ __all__ = [
     "BacktestResult",
     "Trade",
     "backtest",
+    # Tax
+    "withholding_tax_rate",
+    "withholding_tax_table",
+    # Twitter/X (optional, requires borsapy[twitter])
+    "set_twitter_auth",
+    "get_twitter_auth",
+    "clear_twitter_auth",
+    "search_tweets",
 ]

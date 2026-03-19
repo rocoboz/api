@@ -32,6 +32,13 @@ __all__ = [
     "calculate_vwap",
     "calculate_adx",
     "calculate_supertrend",
+    "calculate_hhv",
+    "calculate_llv",
+    "calculate_mom",
+    "calculate_roc",
+    "calculate_wma",
+    "calculate_dema",
+    "calculate_tema",
     "add_indicators",
 ]
 
@@ -552,6 +559,168 @@ def calculate_supertrend(
 
 
 # =============================================================================
+# MetaStock Indicators
+# =============================================================================
+
+
+def calculate_hhv(
+    df: pd.DataFrame, period: int = 14, column: str = "High"
+) -> pd.Series:
+    """Calculate Highest High Value (HHV) - MetaStock indicator.
+
+    Returns the highest value of a column over a rolling window.
+
+    Args:
+        df: DataFrame with price data
+        period: Lookback period (default 14)
+        column: Column to use (default "High")
+
+    Returns:
+        Series with HHV values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"HHV_{period}")
+    return df[col].rolling(window=period, min_periods=1).max()
+
+
+def calculate_llv(
+    df: pd.DataFrame, period: int = 14, column: str = "Low"
+) -> pd.Series:
+    """Calculate Lowest Low Value (LLV) - MetaStock indicator.
+
+    Returns the lowest value of a column over a rolling window.
+
+    Args:
+        df: DataFrame with price data
+        period: Lookback period (default 14)
+        column: Column to use (default "Low")
+
+    Returns:
+        Series with LLV values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"LLV_{period}")
+    return df[col].rolling(window=period, min_periods=1).min()
+
+
+def calculate_mom(
+    df: pd.DataFrame, period: int = 10, column: str = "Close"
+) -> pd.Series:
+    """Calculate Momentum (MOM) - MetaStock indicator.
+
+    MOM = Close - Close[N periods ago]
+
+    Args:
+        df: DataFrame with price data
+        period: Lookback period (default 10)
+        column: Column to use (default "Close")
+
+    Returns:
+        Series with Momentum values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"MOM_{period}")
+    return df[col] - df[col].shift(period)
+
+
+def calculate_roc(
+    df: pd.DataFrame, period: int = 10, column: str = "Close"
+) -> pd.Series:
+    """Calculate Rate of Change (ROC) - MetaStock indicator.
+
+    ROC = ((Close - Close[N]) / Close[N]) * 100
+
+    Args:
+        df: DataFrame with price data
+        period: Lookback period (default 10)
+        column: Column to use (default "Close")
+
+    Returns:
+        Series with ROC values (percentage)
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"ROC_{period}")
+    shifted = df[col].shift(period)
+    return ((df[col] - shifted) / shifted) * 100
+
+
+def calculate_wma(
+    df: pd.DataFrame, period: int = 20, column: str = "Close"
+) -> pd.Series:
+    """Calculate Weighted Moving Average (WMA) - MetaStock indicator.
+
+    WMA assigns linearly increasing weights to recent data.
+    Weight for period i = i (most recent gets highest weight).
+
+    Args:
+        df: DataFrame with price data
+        period: Number of periods (default 20)
+        column: Column to use (default "Close")
+
+    Returns:
+        Series with WMA values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"WMA_{period}")
+    weights = np.arange(1, period + 1, dtype=float)
+    return df[col].rolling(window=period, min_periods=period).apply(
+        lambda x: np.dot(x, weights) / weights.sum(), raw=True
+    )
+
+
+def calculate_dema(
+    df: pd.DataFrame, period: int = 20, column: str = "Close"
+) -> pd.Series:
+    """Calculate Double Exponential Moving Average (DEMA) - MetaStock indicator.
+
+    DEMA = 2 * EMA(Close, N) - EMA(EMA(Close, N), N)
+
+    Args:
+        df: DataFrame with price data
+        period: Number of periods (default 20)
+        column: Column to use (default "Close")
+
+    Returns:
+        Series with DEMA values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"DEMA_{period}")
+    ema1 = df[col].ewm(span=period, adjust=False).mean()
+    ema2 = ema1.ewm(span=period, adjust=False).mean()
+    return 2 * ema1 - ema2
+
+
+def calculate_tema(
+    df: pd.DataFrame, period: int = 20, column: str = "Close"
+) -> pd.Series:
+    """Calculate Triple Exponential Moving Average (TEMA) - MetaStock indicator.
+
+    TEMA = 3*EMA - 3*EMA(EMA) + EMA(EMA(EMA))
+
+    Args:
+        df: DataFrame with price data
+        period: Number of periods (default 20)
+        column: Column to use (default "Close")
+
+    Returns:
+        Series with TEMA values
+    """
+    col = _get_price_column(df, column)
+    if col not in df.columns:
+        return pd.Series(np.nan, index=df.index, name=f"TEMA_{period}")
+    ema1 = df[col].ewm(span=period, adjust=False).mean()
+    ema2 = ema1.ewm(span=period, adjust=False).mean()
+    ema3 = ema2.ewm(span=period, adjust=False).mean()
+    return 3 * ema1 - 3 * ema2 + ema3
+
+
+# =============================================================================
 # Convenience Function - Add all indicators to DataFrame
 # =============================================================================
 
@@ -567,7 +736,8 @@ def add_indicators(
         df: DataFrame with OHLCV data (Open, High, Low, Close, Volume)
         indicators: List of indicators to add. If None, adds all applicable.
             Options: 'sma', 'ema', 'rsi', 'macd', 'bollinger', 'atr',
-                     'stochastic', 'obv', 'vwap', 'adx', 'supertrend'
+                     'stochastic', 'obv', 'vwap', 'adx', 'supertrend',
+                     'hhv', 'llv', 'mom', 'roc', 'wma', 'dema', 'tema'
         **kwargs: Additional arguments for specific indicators:
             - sma_period: SMA period (default 20)
             - ema_period: EMA period (default 12)
@@ -577,6 +747,13 @@ def add_indicators(
             - adx_period: ADX period (default 14)
             - supertrend_period: Supertrend ATR period (default 10)
             - supertrend_multiplier: Supertrend ATR multiplier (default 3.0)
+            - hhv_period: HHV period (default 14)
+            - llv_period: LLV period (default 14)
+            - mom_period: MOM period (default 10)
+            - roc_period: ROC period (default 10)
+            - wma_period: WMA period (default 20)
+            - dema_period: DEMA period (default 20)
+            - tema_period: TEMA period (default 20)
 
     Returns:
         DataFrame with indicator columns added
@@ -605,6 +782,13 @@ def add_indicators(
     adx_period = kwargs.get("adx_period", 14)
     supertrend_period = kwargs.get("supertrend_period", 10)
     supertrend_multiplier = kwargs.get("supertrend_multiplier", 3.0)
+    hhv_period = kwargs.get("hhv_period", 14)
+    llv_period = kwargs.get("llv_period", 14)
+    mom_period = kwargs.get("mom_period", 10)
+    roc_period = kwargs.get("roc_period", 10)
+    wma_period = kwargs.get("wma_period", 20)
+    dema_period = kwargs.get("dema_period", 20)
+    tema_period = kwargs.get("tema_period", 20)
 
     # Add indicators
     for indicator in indicators:
@@ -642,6 +826,22 @@ def add_indicators(
             st_df = calculate_supertrend(df, supertrend_period, supertrend_multiplier)
             result["Supertrend"] = st_df["Supertrend"]
             result["Supertrend_Direction"] = st_df["Supertrend_Direction"]
+        elif indicator == "hhv":
+            col = "High" if "High" in df.columns else "Close"
+            result[f"HHV_{hhv_period}"] = calculate_hhv(df, hhv_period, col)
+        elif indicator == "llv":
+            col = "Low" if "Low" in df.columns else "Close"
+            result[f"LLV_{llv_period}"] = calculate_llv(df, llv_period, col)
+        elif indicator == "mom":
+            result[f"MOM_{mom_period}"] = calculate_mom(df, mom_period)
+        elif indicator == "roc":
+            result[f"ROC_{roc_period}"] = calculate_roc(df, roc_period)
+        elif indicator == "wma":
+            result[f"WMA_{wma_period}"] = calculate_wma(df, wma_period)
+        elif indicator == "dema":
+            result[f"DEMA_{dema_period}"] = calculate_dema(df, dema_period)
+        elif indicator == "tema":
+            result[f"TEMA_{tema_period}"] = calculate_tema(df, tema_period)
 
     return result
 
@@ -733,6 +933,34 @@ class TechnicalAnalyzer:
         """
         return calculate_supertrend(self._df, atr_period, multiplier)
 
+    def hhv(self, period: int = 14, column: str = "High") -> pd.Series:
+        """Calculate Highest High Value (HHV)."""
+        return calculate_hhv(self._df, period, column)
+
+    def llv(self, period: int = 14, column: str = "Low") -> pd.Series:
+        """Calculate Lowest Low Value (LLV)."""
+        return calculate_llv(self._df, period, column)
+
+    def mom(self, period: int = 10) -> pd.Series:
+        """Calculate Momentum (MOM)."""
+        return calculate_mom(self._df, period)
+
+    def roc(self, period: int = 10) -> pd.Series:
+        """Calculate Rate of Change (ROC)."""
+        return calculate_roc(self._df, period)
+
+    def wma(self, period: int = 20) -> pd.Series:
+        """Calculate Weighted Moving Average (WMA)."""
+        return calculate_wma(self._df, period)
+
+    def dema(self, period: int = 20) -> pd.Series:
+        """Calculate Double Exponential Moving Average (DEMA)."""
+        return calculate_dema(self._df, period)
+
+    def tema(self, period: int = 20) -> pd.Series:
+        """Calculate Triple Exponential Moving Average (TEMA)."""
+        return calculate_tema(self._df, period)
+
     def heikin_ashi(self) -> pd.DataFrame:
         """Calculate Heikin Ashi candlestick values.
 
@@ -776,10 +1004,20 @@ class TechnicalAnalyzer:
             result["bb_middle"] = float(bb_df["BB_Middle"].iloc[-1])
             result["bb_lower"] = float(bb_df["BB_Lower"].iloc[-1])
 
+        # MetaStock indicators (need Close or Price)
+        if has_price and len(self._df) > 0:
+            result["mom_10"] = float(self.mom(10).iloc[-1])
+            result["roc_10"] = float(self.roc(10).iloc[-1])
+            result["wma_20"] = float(self.wma(20).iloc[-1])
+            result["dema_20"] = float(self.dema(20).iloc[-1])
+            result["tema_20"] = float(self.tema(20).iloc[-1])
+
         # Need High, Low, Close
         if self._has_hlc and len(self._df) > 0:
             result["atr_14"] = float(self.atr(14).iloc[-1])
             result["adx_14"] = float(self.adx(14).iloc[-1])
+            result["hhv_14"] = float(self.hhv(14).iloc[-1])
+            result["llv_14"] = float(self.llv(14).iloc[-1])
 
             stoch_df = self.stochastic()
             result["stoch_k"] = float(stoch_df["Stoch_K"].iloc[-1])
@@ -1334,3 +1572,125 @@ class TechnicalMixin:
             "upper": round(float(st_df["Supertrend_Upper"].iloc[-1]), 2),
             "lower": round(float(st_df["Supertrend_Lower"].iloc[-1]), 2),
         }
+
+    def hhv(self, period: str = "3mo", hhv_period: int = 14, column: str = "High") -> float:
+        """Get latest Highest High Value (HHV).
+
+        Args:
+            period: History period to fetch (default "3mo")
+            hhv_period: Lookback period (default 14)
+            column: Column to use (default "High")
+
+        Returns:
+            Latest HHV value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_hhv(df, hhv_period, column)
+        return round(float(series.iloc[-1]), 2)
+
+    def llv(self, period: str = "3mo", llv_period: int = 14, column: str = "Low") -> float:
+        """Get latest Lowest Low Value (LLV).
+
+        Args:
+            period: History period to fetch (default "3mo")
+            llv_period: Lookback period (default 14)
+            column: Column to use (default "Low")
+
+        Returns:
+            Latest LLV value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_llv(df, llv_period, column)
+        return round(float(series.iloc[-1]), 2)
+
+    def mom(self, period: str = "3mo", mom_period: int = 10) -> float:
+        """Get latest Momentum (MOM) value.
+
+        MOM = Close - Close[N periods ago]
+
+        Args:
+            period: History period to fetch (default "3mo")
+            mom_period: Lookback period (default 10)
+
+        Returns:
+            Latest Momentum value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_mom(df, mom_period)
+        return round(float(series.iloc[-1]), 2)
+
+    def roc(self, period: str = "3mo", roc_period: int = 10) -> float:
+        """Get latest Rate of Change (ROC) value.
+
+        ROC = ((Close - Close[N]) / Close[N]) * 100
+
+        Args:
+            period: History period to fetch (default "3mo")
+            roc_period: Lookback period (default 10)
+
+        Returns:
+            Latest ROC value (percentage)
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_roc(df, roc_period)
+        return round(float(series.iloc[-1]), 2)
+
+    def wma(self, period: str = "3mo", wma_period: int = 20) -> float:
+        """Get latest Weighted Moving Average (WMA) value.
+
+        Args:
+            period: History period to fetch (default "3mo")
+            wma_period: WMA period (default 20)
+
+        Returns:
+            Latest WMA value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_wma(df, wma_period)
+        return round(float(series.iloc[-1]), 2)
+
+    def dema(self, period: str = "3mo", dema_period: int = 20) -> float:
+        """Get latest Double Exponential Moving Average (DEMA) value.
+
+        DEMA = 2*EMA - EMA(EMA)
+
+        Args:
+            period: History period to fetch (default "3mo")
+            dema_period: DEMA period (default 20)
+
+        Returns:
+            Latest DEMA value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_dema(df, dema_period)
+        return round(float(series.iloc[-1]), 2)
+
+    def tema(self, period: str = "3mo", tema_period: int = 20) -> float:
+        """Get latest Triple Exponential Moving Average (TEMA) value.
+
+        TEMA = 3*EMA - 3*EMA(EMA) + EMA(EMA(EMA))
+
+        Args:
+            period: History period to fetch (default "3mo")
+            tema_period: TEMA period (default 20)
+
+        Returns:
+            Latest TEMA value
+        """
+        df = self.history(period=period)
+        if df.empty:
+            return np.nan
+        series = calculate_tema(df, tema_period)
+        return round(float(series.iloc[-1]), 2)
