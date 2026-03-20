@@ -231,6 +231,45 @@ def clean_json_val(val):
         pass
     return val
 
+
+def api_ok(data: Any, meta: Optional[Dict[str, Any]] = None):
+    return {
+        "success": True,
+        "data": data,
+        "error": None,
+        "meta": meta or {}
+    }
+
+
+def normalize_stock_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "symbol": row.get("symbol") or row.get("name"),
+        "name": row.get("long_name") or row.get("symbol") or row.get("name"),
+        "price": clean_json_val(row.get("price")) or 0,
+        "change": clean_json_val(row.get("change")) or 0,
+        "changePercent": clean_json_val(row.get("change")) or 0,
+        "volume": clean_json_val(row.get("volume")) or 0,
+        "market_cap": clean_json_val(row.get("market_cap")) or 0,
+        "pe": clean_json_val(row.get("pe")) or 0,
+        "pddd": clean_json_val(row.get("pddd")) or 0,
+        "last_update": datetime.now(ZoneInfo("Europe/Istanbul")).isoformat()
+    }
+
+
+def normalize_fund_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "fund_code": row.get("fund_code") or row.get("code"),
+        "name": row.get("name"),
+        "fund_type": row.get("fund_type") or row.get("category") or "Genel",
+        "price": clean_json_val(row.get("price")) or 0,
+        "change": clean_json_val(row.get("change")) or 0,
+        "return_1m": clean_json_val(row.get("return_1m")) or 0,
+        "return_3m": clean_json_val(row.get("return_3m")) or 0,
+        "return_6m": clean_json_val(row.get("return_6m")) or 0,
+        "return_ytd": clean_json_val(row.get("return_ytd")) or 0,
+        "return_1y": clean_json_val(row.get("return_1y")) or 0,
+    }
+
 def analyze_sentiment(text_list: List[str]) -> Dict[str, Any]:
     if not text_list: return {"score": 0, "label": "NEUTRAL", "confidence": 0}
     
@@ -282,16 +321,16 @@ twitter_lock = threading.Lock()
 
 # --- ENDPOINTS: BASE ---
 @app.get("/ping")
-def ping(): return {"status": "ok", "time": datetime.now().isoformat()}
+def ping(): return api_ok({"status": "ok", "time": datetime.now().isoformat()})
 
 @app.get("/")
 def home():
-    return {
+    return api_ok({
         "service": "BorsaPy Ultimate API",
         "version": "1.2.1",
         "github": "https://github.com/rocoboz/api",
         "docs": "/docs"
-    }
+    })
 
 # --- ENDPOINTS: STOCKS ---
 @app.get("/stocks/list")
@@ -398,22 +437,20 @@ def compare(symbols: str = Query(...)):
     return get_cached_market(f"COMPARE_{symbols}", fetch)
 
 @app.get("/market/screener")
-def stock_screener(template: Optional[str] = None):
+def stock_screener(template: Optional[str] = None, limit: int = 100, offset: int = 0, sort: Optional[str] = None, direction: str = "desc"):
     """
     Returns high-performance stock screening data using TradingView (v1.0.7).
     """
     def fetch():
         try:
             from tradingview_screener import Query
-            # Fetching: Name, Close, Change, Volume, P/E (TTM), P/B (Ratio), Market Cap
             q = Query().set_markets('turkey').select(
                 'name', 'close', 'change', 'volume', 'price_book_ratio', 'market_cap_basic', 'price_earnings_ttm'
             )
             _, df = q.get_scanner_data()
-            
+
             if df.empty: return []
-            
-            # Map columns to user-friendly names
+
             df = df.rename(columns={
                 "name": "symbol",
                 "close": "price",
@@ -421,12 +458,15 @@ def stock_screener(template: Optional[str] = None):
                 "price_earnings_ttm": "pe",
                 "market_cap_basic": "market_cap"
             })
-            
-            # Clean values (nan -> null)
-            return df_to_json(df)
+
+            if sort and sort in df.columns:
+                df = df.sort_values(sort, ascending=(direction == "asc"))
+
+            sliced = df.iloc[offset:offset+limit]
+            return df_to_json(sliced)
         except Exception as e:
             return {"error": str(e)}
-    return get_cached_market(f"SCREENER_V2_{template}", fetch)
+    return get_cached_market(f"SCREENER_V2_{template}_{limit}_{offset}_{sort}_{direction}", fetch)
 
 @app.get("/stocks/{symbol}/dividends")
 def get_dividends(symbol: str):
@@ -754,6 +794,19 @@ def get_fund_detail(code: str):
             return {"error": str(e)}
     return get_cached_static(f"FUND_DETAIL_{code}", fetch)
 
+@app.get("/funds/{code}/history")
+def get_fund_history(code: str, period: str = "1mo"):
+    code = code.upper()
+    def fetch():
+        try:
+            f = Fund(code)
+            df = f.history(period=period)
+            if df.empty: return []
+            return df_to_json(df)
+        except Exception:
+            return []
+    return get_cached_realtime(f"FUND_HISTORY_{code}_{period}", fetch)
+
 @app.get("/funds/screener")
 def tefas_screener(fund_type: str = "YAT"):
     def fetch():
@@ -826,6 +879,54 @@ def get_market_heatmap():
         except Exception as e:
             return {"error": str(e)}
     return get_cached_market("MARKET_HEATMAP", fetch)
+
+@app.get("/market/summary")
+def market_summary():
+    def fetch():
+        try:
+            from tradingview_screener import Query
+            _, breadth_df = Query().set_markets('turkey').select('name', 'change', 'volume', 'sector').get_scanner_data()
+            if breadth_df.empty:
+                breadth = {"up": 0, "down": 0, "neutral": 0, "ratio": 0, "sentiment": "NEUTRAL"}
+            else:
+                changes = breadth_df['change'].astype(float)
+                up = int((changes > 0).sum())
+                down = int((changes < 0).sum())
+                neutral = int((changes == 0).sum())
+                breadth = {
+                    "up": up,
+                    "down": down,
+                    "neutral": neutral,
+                    "ratio": round(up/down, 2) if down > 0 else up,
+                    "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL")
+                }
+        except Exception:
+            breadth = {"up": 0, "down": 0, "neutral": 0, "ratio": 0, "sentiment": "NEUTRAL"}
+        heatmap = get_market_heatmap()
+        screener_data = stock_screener(limit=6, offset=0, sort="change", direction="desc")
+        funds_data = list_funds(limit=6, offset=0)
+        calendar_data = get_economic_calendar(scope="week")
+        return api_ok({
+            "breadth": breadth if isinstance(breadth, dict) else {},
+            "heatmap": heatmap if isinstance(heatmap, list) else [],
+            "movers": [normalize_stock_row(item) for item in screener_data if isinstance(item, dict)][:6],
+            "funds": [normalize_fund_row(item) for item in funds_data if isinstance(item, dict)][:6],
+            "calendar": calendar_data[:6] if isinstance(calendar_data, list) else [],
+            "updated_at": datetime.now(ZoneInfo("Europe/Istanbul")).isoformat()
+        })
+    return get_cached_market("MARKET_SUMMARY", fetch)
+
+@app.get("/home/highlights")
+def home_highlights():
+    def fetch():
+        movers = stock_screener(limit=4, offset=0, sort="change", direction="desc")
+        funds_data = list_funds(limit=4, offset=0)
+        return api_ok({
+            "stocks": [normalize_stock_row(item) for item in movers if isinstance(item, dict)][:4],
+            "funds": [normalize_fund_row(item) for item in funds_data if isinstance(item, dict)][:4],
+            "updated_at": datetime.now(ZoneInfo("Europe/Istanbul")).isoformat()
+        })
+    return get_cached_market("HOME_HIGHLIGHTS", fetch)
 
 @app.get("/market/economy/rates")
 def get_tcmb_rates():
@@ -917,11 +1018,24 @@ def unified_search(q: str):
         try:
             stocks = market.search_companies(q)
             funds = search_funds(q, limit=10)
-            st_res = df_to_json(stocks.head(10)) # Manual limit for companies
+            st_res = df_to_json(stocks.head(10))
             f_res = df_to_json(funds)
-            return {"stocks": st_res, "funds": f_res, "total": len(st_res) + len(f_res)}
+            indexes = []
+            try:
+                for code in ["XU100", "XBANK", "XUSIN"]:
+                    if q.upper() in code:
+                        idx = Index(code)
+                        indexes.append({
+                            "symbol": code,
+                            "name": idx.info.get("short_name", code),
+                            "price": clean_json_val(idx.info.get("last_price")) or 0,
+                            "change": clean_json_val(idx.info.get("change_percent")) or 0
+                        })
+            except Exception:
+                pass
+            return {"stocks": st_res, "funds": f_res, "indexes": indexes, "total": len(st_res) + len(f_res) + len(indexes)}
         except Exception:
-            return {"stocks": [], "funds": [], "total": 0}
+            return {"stocks": [], "funds": [], "indexes": [], "total": 0}
     return get_cached_static(f"SEARCH_{q}", fetch)
 
 if __name__ == "__main__":

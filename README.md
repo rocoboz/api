@@ -1,62 +1,152 @@
-# 📊 BorsaPy Ultimate API (v1.2.1 - Pro Sync Edition)
+# BorsaPy Ultimate API
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green?style=for-the-badge&logo=fastapi&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Stable_v1.2.1-success?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Stable-success?style=for-the-badge)
 
-**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP ve TEFAS Fon verilerini milisaniyeler içinde sunan profesyonel bir finansal ağ geçididir. v1.2.1 "Pro Sync" sürümü ile frontend-backend uyumu ve veri derinliği en üst seviyeye taşınmıştır.
-
----
-
-## 💎 v1.2.1 "Pro Sync" Yenilikleri
-
-*   **🔍 Birleşik Arama (Unified Search):** Tek bir `/search` aramasıyla hem hisseleri hem de fonları (TP2, TLY vb.) anında bulabilirsiniz.
-*   **📡 Sınırsız Veri Desteği:** `/list` uç noktalarına eklenen `limit` ve `offset` parametreleri ile 50 sınırlaması tarihe karıştı. Binlerce veriyi tek seferde veya sayfalayarak çekebilirsiniz.
-*   **💰 Fon Detay Kartları:** `/funds/{code}` ile fonun TEFAS'taki yatırımcı sayısı, risk değeri ve tam portföy dağılımına anında erişim.
-*   **🛡️ NaN Shield (Stabilite):** Yeni halka arzlar (MEYSU, MTRKS vb.) gibi RSA/MA verisi kısa olan sembollerde API artık asla çökmüyor, eksik veriyi `null` geçerek stabil kalıyor.
+`BorsaPy Ultimate API`, Borsa Istanbul, TEFAS ve seçili piyasa verilerini frontend dostu bir FastAPI katmanında sunar. Bu sürümde dashboard entegrasyonu, özet endpointleri ve daha düzenli arama/screener davranışı iyileştirildi.
 
 ---
 
-## 📡 API Uç Noktaları ve Kullanım Rehberi
+## Öne Çıkanlar
 
-### 🧠 Akıllı Analiz & AI
-| Metod | Uç Nokta | Açıklama |
+- Birleşik arama: `/search` artık hisse, fon ve eşleşen endeksleri tek çağrıda dönebilir.
+- Dashboard özetleri: `/market/summary` ve `/home/highlights` ile frontend tek uçtan özet veri çekebilir.
+- Daha esnek screener: `/market/screener` artık `limit`, `offset`, `sort`, `direction` parametrelerini destekler.
+- Fon geçmişi: `/funds/{code}/history` ile fon fiyat eğrisi ayrı endpointten alınabilir.
+- Tutarlı base responses: `/ping` ve `/` endpointleri `success/data/error/meta` zarfı döndürür.
+
+---
+
+## Temel Endpointler
+
+### Analiz
+
+| Method | Endpoint | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/analysis/{symbol}/insight` | **Hibrit AI:** Teknik + Temel + KAP Haber harmanlı 0-100 puanlı analiz. |
-| `GET` | `/analysis/{symbol}` | **Sinyal:** RSI, Golden Cross ve Supertrend teknik sinyalleri. |
+| `GET` | `/analysis/{symbol}` | RSI, MA ve sinyal verileri |
+| `GET` | `/analysis/{symbol}/insight` | Hibrit teknik + temel + haber skoru |
+| `GET` | `/analysis/{symbol}/sentiment` | Twitter/X duyarlılık analizi |
 
-### 📈 Hisse Senedi & Fonlar (Global)
-| Metod | Uç Nokta | Örnek Parametreler | Açıklama |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/stocks/{symbol}/history` | `?period=1mo` / `?period=1y` | Hissenin veya Fonun (3 harf) tarihsel fiyat dökümü. |
-| `GET` | `/stocks/{symbol}` | `/stocks/THYAO` | Hisse canlı fiyatı ve detaylı KAP bilgileri. |
-| `GET` | `/funds/{code}` | `/funds/TP2` | Fonun TEFAS detay kartı (Fiyat, Risk, Portföy). |
-| `GET` | `/search` | `?q=THY` veya `?q=TP2` | **Akıllı Arama:** Hem hisseleri hem fonları beraber bulur. |
+### Hisse ve Fon
 
-### 📋 Listeleme ve Sayfalama (Pagination)
-**İpucu:** Tüm listeleme uç noktalarında `limit` (kaç adet?) ve `offset` (nereden başlasın?) kullanabilirsiniz.
-*   `/stocks/list?limit=500` -> İlk 500 hisseyi listeler.
-*   `/funds/list?fund_type=YAT&limit=300` -> Tüm Yatırım Fonlarını (YAT) listeler.
-*   `/funds/list?fund_type=EYF&limit=200` -> Tüm Emeklilik Fonlarını (EYF) listeler.
+| Method | Endpoint | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/stocks/{symbol}` | Hisse özet ve KAP detayları |
+| `GET` | `/stocks/{symbol}/history` | Hisse veya 3 harfli fon için fiyat geçmişi |
+| `GET` | `/stocks/{symbol}/depth` | Simüle order-flow / depth görünümü |
+| `GET` | `/stocks/{symbol}/dividends` | Temettü geçmişi |
+| `GET` | `/stocks/{symbol}/financials` | Finansal tablolar |
+| `GET` | `/funds/list` | Sayfalanabilir fon listesi |
+| `GET` | `/funds/{code}` | Fon detay kartı |
+| `GET` | `/funds/{code}/history` | Fon geçmiş fiyat eğrisi |
+| `GET` | `/funds/{code}/estimated-return` | Tahmini günlük getiri ve dağılım |
+
+### Piyasa ve Dashboard
+
+| Method | Endpoint | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/market/screener` | Hisse tarayıcı verisi |
+| `GET` | `/market/breadth` | Advance/decline görünümü |
+| `GET` | `/market/heatmap` | Isı haritası için sektör bazlı veri |
+| `GET` | `/market/summary` | Dashboard için birleşik özet veri |
+| `GET` | `/home/highlights` | Öne çıkan hisseler ve fonlar |
+| `GET` | `/market/economy/inflation` | Enflasyon verisi |
+| `GET` | `/market/economy/rates` | TCMB faiz oranları |
+| `GET` | `/market/economy/calendar` | Ekonomik takvim |
+| `GET` | `/market/tax` | Stopaj / vergi tablosu |
+
+### Arama
+
+| Method | Endpoint | Açıklama |
+| :--- | :--- | :--- |
+| `GET` | `/search?q=THY` | Hisse, fon ve endeks eşleşmeleri |
+| `GET` | `/search/tweets?q=THYAO` | Twitter/X araması |
 
 ---
 
-## 🔐 Güvenlik ve Kurulum
+## Parametreler
 
-### Yerel Kurulum (Local Setup)
+### `/market/screener`
+
+- `limit`: Kaç kayıt döneceği
+- `offset`: Sayfalama başlangıcı
+- `sort`: Sıralanacak kolon (`change`, `price`, `volume`, `pe`, `pddd`, `market_cap`)
+- `direction`: `asc` veya `desc`
+
+Örnek:
+
 ```bash
-# Bağımlılıkları yükle
-pip install -r requirements.txt
+/market/screener?limit=20&offset=0&sort=change&direction=desc
+```
 
-# API'yi başlat (Local: http://127.0.0.1:8000)
+### `/funds/list`
+
+- `fund_type`: `YAT`, `EYF` vb.
+- `limit`
+- `offset`
+
+Örnek:
+
+```bash
+/funds/list?fund_type=YAT&limit=100&offset=0
+```
+
+---
+
+## Response Notları
+
+- `/ping` ve `/` artık şu zarfı kullanır:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "error": null,
+  "meta": {}
+}
+```
+
+- Diğer mevcut endpointlerin büyük bölümü geriye uyumluluk için ham JSON döndürmeye devam eder.
+- Frontend bu sürümde hem zarf yapısını hem ham response yapısını tolere edecek şekilde tasarlanmıştır.
+
+---
+
+## Yerel Kurulum
+
+```bash
+pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-### Sunucu Ayarları (Render / Docker)
-*   **API_KEY:** `x-api-key` header'ı üzerinden zorunludur.
-*   **TWITTER_AUTH_TOKEN & CT0:** Sadece `/analysis/{symbol}/sentiment` (Sosyal Medya Analizi) uç noktası için opsiyoneldir. **Insight ve Temel özellikler için zorunlu değildir.**
+Yerel test:
+
+```bash
+python -m py_compile main.py
+```
 
 ---
 
-## ⚠️ Yasal Uyarı
-Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** AI tahminleri hatalı olabilir, yatırım kararlarınızı profesyonel danışmanlara danışarak alınız.
+## Render Deploy
+
+- Bu repo GitHub'a pushlandıktan sonra Render üzerinde manuel deploy tetiklenmelidir.
+- Canlı API adresi:
+
+```text
+https://your-render-service.onrender.com/
+```
+
+- Deploy sonrası kontrol edilmesi önerilen uçlar:
+
+```text
+/ping
+/market/summary
+/home/highlights
+/search?q=THY
+```
+
+---
+
+## Yasal Uyarı
+
+Bu API tarafından sunulan veriler bilgilendirme amaçlıdır. Yatırım tavsiyesi niteliği taşımaz.
