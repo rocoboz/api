@@ -207,16 +207,29 @@ def get_cached_static(key: str, func):
     return data
 
 # --- UTILS ---
-def df_to_json(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    if df is None or (hasattr(df, 'empty') and df.empty): return []
-    # Clean Info for JSON safely using pandas' built-in to_json which handles NaNs as nulls
-    return json.loads(df.to_json(orient="records", date_format="iso"))
+def df_to_json(data: Any) -> List[Dict[str, Any]]:
+    if data is None: return []
+    # If already a list of dicts, just clean NaNs
+    if isinstance(data, list):
+        return [{k: clean_json_val(v) for k, v in item.items()} if isinstance(item, dict) else item for item in data]
+    # If DataFrame
+    if hasattr(data, 'empty') and data.empty: return []
+    return json.loads(data.to_json(orient="records", date_format="iso"))
 
 # --- LIGHTWEIGHT SENTIMENT ENGINE (v1.1.0) ---
 FINANCIAL_KEYWORDS = {
     "positive": ["tavan", "yükseliş", "alım", "rekor", "kar", "büyüme", "temettü", "pozitif", "destek", "hedef", "bullish", "buy", "profit", "growth", "dividend"],
     "negative": ["taban", "düşüş", "satış", "zarar", "negatif", "direnç", "risk", "ayı", "bearish", "sell", "loss", "risk", "warning", "crash"]
 }
+
+def clean_json_val(val):
+    """Safely handles NaN/Inf for JSON (returns None)"""
+    if val is None: return None
+    try:
+        if np.isnan(val) or np.isinf(val): return None
+    except:
+        pass
+    return val
 
 def analyze_sentiment(text_list: List[str]) -> Dict[str, Any]:
     if not text_list: return {"score": 0, "label": "NEUTRAL", "confidence": 0}
@@ -275,15 +288,22 @@ def ping(): return {"status": "ok", "time": datetime.now().isoformat()}
 def home():
     return {
         "service": "BorsaPy Ultimate API",
-        "version": "1.0.7",
+        "version": "1.2.1",
         "github": "https://github.com/rocoboz/api",
         "docs": "/docs"
     }
 
 # --- ENDPOINTS: STOCKS ---
 @app.get("/stocks/list")
-def list_stocks():
-    return get_cached_static("STOCKS_LIST", lambda: df_to_json(market.companies()))
+def list_stocks(limit: int = 50, offset: int = 0):
+    def fetch():
+        try:
+            df = market.companies() # Returns all companies
+            if df.empty: return []
+            sliced = df.iloc[offset:offset+limit]
+            return df_to_json(sliced)
+        except: return []
+    return get_cached_static(f"ST_LIST_{limit}_{offset}", fetch)
 
 @app.get("/stocks/{symbol}")
 def get_stock(symbol: str):
@@ -308,12 +328,20 @@ def get_stock(symbol: str):
     return get_cached_market(f"STOCK_{symbol}", fetch)
 
 @app.get("/stocks/{symbol}/history")
-def stock_history(symbol: str, period: str = "1mo", interval: str = "1d"):
-    key = f"HIST_{symbol}_{period}_{interval}"
+def get_history(symbol: str, period: str = "1mo", interval: str = "1d"):
+    symbol = symbol.upper()
     def fetch():
-        tk = Ticker(symbol)
-        return df_to_json(tk.history(period=period, interval=interval))
-    return get_cached_market(key, fetch)
+        # Handle Funds vs Stocks (Funds are 3 chars)
+        if len(symbol) == 3:
+            f = Fund(symbol)
+            df = f.history(period=period)
+        else:
+            tk = Ticker(symbol)
+            df = tk.history(period=period, interval=interval)
+        
+        if df.empty: return {"error": "No data"}
+        return df_to_json(df)
+    return get_cached_realtime(f"HIST_{symbol}_{period}_{interval}", fetch)
 
 @app.get("/stocks/{symbol}/depth")
 @limiter.limit("10/minute")
@@ -440,30 +468,42 @@ def get_financials(symbol: str, type: str = "income"):
 def get_analysis_pro(symbol: str):
     symbol = symbol.upper()
     def fetch():
-        tk = Ticker(symbol)
-        df = tk.history(period="1y")
+        # Router: Fund vs Stock
+        if len(symbol) == 3:
+            obj = Fund(symbol)
+        else:
+            obj = Ticker(symbol)
+            
+        df = obj.history(period="1y")
         if df.empty: return {"error": "No history"}
-        rsi = technical.calculate_rsi(df).iloc[-1]
-        supertrend = technical.calculate_supertrend(df).iloc[-1]
         
-        # Add simpler signals
-        ma50 = df['Close'].rolling(50).mean().iloc[-1]
-        ma200 = df['Close'].rolling(200).mean().iloc[-1]
-        current = df['Close'].iloc[-1]
+        rsi_s = technical.calculate_rsi(df)
+        super_df = technical.calculate_supertrend(df)
+        
+        rsi = clean_json_val(rsi_s.iloc[-1])
+        supertrend = clean_json_val(super_df["Supertrend"].iloc[-1]) if "Supertrend" in super_df else None
+        
+        # Add simpler signals with NaN protection
+        ma50_v = df['Close'].rolling(50).mean()
+        ma200_v = df['Close'].rolling(200).mean()
+        
+        ma50 = clean_json_val(ma50_v.iloc[-1]) if len(ma50_v) > 0 else None
+        ma200 = clean_json_val(ma200_v.iloc[-1]) if len(ma200_v) > 0 else None
+        current = float(df['Close'].iloc[-1])
         
         return {
             "symbol": symbol,
-            "rsi": round(rsi, 2) if not np.isnan(rsi) else None,
-            "supertrend": round(supertrend["Supertrend"], 2) if "Supertrend" in supertrend else None,
+            "rsi": rsi,
+            "supertrend": supertrend,
             "ma_comparison": {
-                "ma50": round(ma50, 2),
-                "ma200": round(ma200, 2),
-                "trend": "BULLISH" if ma50 > ma200 else "BEARISH",
-                "price_vs_ma50": "ABOVE" if current > ma50 else "BELOW"
+                "ma50": ma50,
+                "ma200": ma200,
+                "trend": "BULLISH" if (ma50 and ma200 and ma50 > ma200) else "NEUTRAL",
+                "price_vs_ma50": "ABOVE" if (current and ma50 and current > ma50) else "BELOW"
             },
-            "signal": "STRONG BUY" if rsi < 30 and current > ma200 else ("BUY" if rsi < 35 else ("SELL" if rsi > 70 else "NEUTRAL"))
+            "signal": "STRONG BUY" if (rsi and rsi < 30 and ma200 and current > ma200) else ("BUY" if (rsi and rsi < 35) else ("SELL" if (rsi and rsi > 70) else "NEUTRAL"))
         }
-    return get_cached_market(f"ANALYSIS_PRO_{symbol}", fetch)
+    return get_cached_market(f"ANALYSIS_PRO_V2_{symbol}", fetch)
 
 @app.get("/analysis/{symbol}/sentiment")
 def get_sentiment_analysis(symbol: str):
@@ -688,14 +728,31 @@ def get_fund_estimated_return(request: Request, code: str):
     return get_cached_realtime(f"FUND_EST_{code}", fetch)
 
 @app.get("/funds/list")
-def list_funds(fund_type: str = "YAT"):
-    """
-    Returns a complete list of all active funds from TEFAS (v1.0.8).
-    Default fund_type is 'YAT' (Yatırım Fonu). Use 'EYF' for Pension Funds.
-    """
+def list_funds(fund_type: str = "YAT", limit: int = 50, offset: int = 0):
+    """Returns paginated fund list using screen_funds (v1.2.1)"""
     def fetch():
-        return df_to_json(screen_funds(fund_type=fund_type))
-    return get_cached_static(f"FUNDS_LIST_{fund_type}", fetch)
+        # Fetching a larger pool for internal pagination
+        df = screen_funds(fund_type=fund_type)
+        if df.empty: return []
+        sliced = df.iloc[offset:offset+limit]
+        return df_to_json(sliced)
+    return get_cached_static(f"FUND_LIST_{fund_type}_{limit}_{offset}", fetch)
+
+@app.get("/funds/{code}")
+def get_fund_detail(code: str):
+    """Returns standalone fund detail cards (v1.2.1)"""
+    code = code.upper()
+    def fetch():
+        try:
+            f = Fund(code)
+            info = f.info
+            if not info: return {"error": "Fund not found"}
+            # Clean possible NaNs in info dict
+            clean_info = {k: clean_json_val(v) for k, v in info.items()}
+            return clean_info
+        except Exception as e:
+            return {"error": str(e)}
+    return get_cached_static(f"FUND_DETAIL_{code}", fetch)
 
 @app.get("/funds/screener")
 def tefas_screener(fund_type: str = "YAT"):
@@ -853,19 +910,19 @@ def twitter_search(
             except Exception as e:
                 return {"error": f"Twitter Search Failed: {str(e)}"}
 
-    return get_cached_realtime(f"TWITTER_{q}_{limit}_{auth_token is not None}", fetch)
-
 @app.get("/search")
-def global_search(q: str):
-    def fetch(): return df_to_json(market.search_companies(q))
-    return get_cached_market(f"SEARCH_{q}", fetch)
-
-@app.get("/search/tweets")
-def twitter_search(q: str, limit: int = 15):
-    try:
-        def fetch(): return df_to_json(search_tweets(query=q, limit=limit))
-        return get_cached_market(f"TWEETS_{q}", fetch)
-    except: return []
+def unified_search(q: str):
+    """Unified Search for Stocks and Funds (v1.2.1)"""
+    def fetch():
+        try:
+            stocks = market.search_companies(q)
+            funds = search_funds(q, limit=10)
+            st_res = df_to_json(stocks.head(10)) # Manual limit for companies
+            f_res = df_to_json(funds)
+            return {"stocks": st_res, "funds": f_res, "total": len(st_res) + len(f_res)}
+        except Exception:
+            return {"stocks": [], "funds": [], "total": 0}
+    return get_cached_static(f"SEARCH_{q}", fetch)
 
 if __name__ == "__main__":
     import uvicorn
