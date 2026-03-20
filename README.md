@@ -1,44 +1,43 @@
-# 📊 BorsaPy Ultimate API (v1.2.0 - Hybrid AI Engine)
+# 📊 BorsaPy Ultimate API (v1.2.1 - Pro Sync Edition)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green?style=for-the-badge&logo=fastapi&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Hybrid_AI_Enabled-success?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Stable_v1.2.1-success?style=for-the-badge)
 
-**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP ve Fon verilerini sunan **yüksek performanslı ve Hibrit AI destekli** bir finansal ağ geçididir. v1.2.0 sürümü ile Twitter'a bağımlılığı bitiriyor; KAP haberlerini ve teknik/temel verileri harmanlayan "Insight" motorunu sunuyoruz.
-
----
-
-## 💎 v1.2.0 Hibrit AI Özellikleri
-
-*   **🧠 Hibrit Insight Motoru:** `/analysis/{symbol}/insight` ucu ile hissenin **Teknik (RSI, MA), Temel (F/K, PD/DD) ve Haber (KAP)** verilerini tek bir potada eriterek **0-100 arası bir Güven Skoru** üretir.
-*   **📡 Bağımsız KAP Analizi:** Twitter Auth bilgisi olmasa bile, en güncel KAP bildirimlerini okuyup sentiment (duyarlılık) analizi yapar. 
-*   **📊 Gerçek Veri Odaklı:** "0" veya hatalı veri riskine karşı tüm finansal çarpanlar (P/E, P/B) ve hacim verileri doğrulanmıştır.
-*   **🗓️ Global Ekonomik Ajanda:** `/market/economy/calendar` ile artık sadece Türkiye değil, dünya piyasalarındaki dev olayları da takip edebilirsiniz.
+**BorsaPy Ultimate API**, Borsa İstanbul (BIST), VIOP ve TEFAS Fon verilerini milisaniyeler içinde sunan profesyonel bir finansal ağ geçididir. v1.2.1 "Pro Sync" sürümü ile frontend-backend uyumu ve veri derinliği en üst seviyeye taşınmıştır.
 
 ---
 
-## 📡 API Uç Noktaları (Endpoints)
+## 💎 v1.2.1 "Pro Sync" Yenilikleri
 
-### 🧠 AI & Akıllı Analiz
+*   **🔍 Birleşik Arama (Unified Search):** Tek bir `/search` aramasıyla hem hisseleri hem de fonları (TP2, TLY vb.) anında bulabilirsiniz.
+*   **📡 Sınırsız Veri Desteği:** `/list` uç noktalarına eklenen `limit` ve `offset` parametreleri ile 50 sınırlaması tarihe karıştı. Binlerce veriyi tek seferde veya sayfalayarak çekebilirsiniz.
+*   **💰 Fon Detay Kartları:** `/funds/{code}` ile fonun TEFAS'taki yatırımcı sayısı, risk değeri ve tam portföy dağılımına anında erişim.
+*   **🛡️ NaN Shield (Stabilite):** Yeni halka arzlar (MEYSU, MTRKS vb.) gibi RSA/MA verisi kısa olan sembollerde API artık asla çökmüyor, eksik veriyi `null` geçerek stabil kalıyor.
+
+---
+
+## 📡 API Uç Noktaları ve Kullanım Rehberi
+
+### 🧠 Akıllı Analiz & AI
 | Metod | Uç Nokta | Açıklama |
 | :--- | :--- | :--- |
-| `GET` | `/analysis/{symbol}/insight` | **ULTIMATE:** Teknik + Temel + KAP Haber harmanlı 0-100 puanlı analiz. |
-| `GET` | `/analysis/{symbol}/sentiment` | **Twitter:** Sosyal medya duyarlılık analizi (Opsiyonel Auth gerektirir). |
-| `GET` | `/analysis/{symbol}` | **Teknik:** RSI, Supertrend ve Golden Cross sinyal motoru. |
+| `GET` | `/analysis/{symbol}/insight` | **Hibrit AI:** Teknik + Temel + KAP Haber harmanlı 0-100 puanlı analiz. |
+| `GET` | `/analysis/{symbol}` | **Sinyal:** RSI, Golden Cross ve Supertrend teknik sinyalleri. |
 
-### 📈 Hisse Senedi & Piyasa
-| Metod | Uç Nokta | Açıklama |
-| :--- | :--- | :--- |
-| `GET` | `/stocks/{symbol}/dividends` | Şirketin geçmiş temettü ödemeleri. |
-| `GET` | `/stocks/{symbol}/financials` | Gelir tablosu ve Bilanço özetleri. |
-| `GET` | `/market/screener` | PD/DD, F/K ve Hacim içeren profesyonel tarayıcı. |
-| `GET` | `/market/breadth` | BIST para girişi ve yükselen/düşen hacim dağılımı. |
+### 📈 Hisse Senedi & Fonlar (Global)
+| Metod | Uç Nokta | Örnek Parametreler | Açıklama |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/stocks/{symbol}/history` | `?period=1mo` / `?period=1y` | Hissenin veya Fonun (3 harf) tarihsel fiyat dökümü. |
+| `GET` | `/stocks/{symbol}` | `/stocks/THYAO` | Hisse canlı fiyatı ve detaylı KAP bilgileri. |
+| `GET` | `/funds/{code}` | `/funds/TP2` | Fonun TEFAS detay kartı (Fiyat, Risk, Portföy). |
+| `GET` | `/search` | `?q=THY` veya `?q=TP2` | **Akıllı Arama:** Hem hisseleri hem fonları beraber bulur. |
 
-### 💰 Fonlar (TEFAS & KAP)
-| Metod | Uç Nokta | Açıklama |
-| :--- | :--- | :--- |
-| `GET` | `/funds/list` | Tüm aktif yatırım ve emeklilik fonları listesi. |
-| `GET` | `/funds/{code}/estimated-return` | **Deep Scan:** Fonun PDF içeriğine göre anlık getiri tahmini. |
+### 📋 Listeleme ve Sayfalama (Pagination)
+**İpucu:** Tüm listeleme uç noktalarında `limit` (kaç adet?) ve `offset` (nereden başlasın?) kullanabilirsiniz.
+*   `/stocks/list?limit=500` -> İlk 500 hisseyi listeler.
+*   `/funds/list?fund_type=YAT&limit=300` -> Tüm Yatırım Fonlarını (YAT) listeler.
+*   `/funds/list?fund_type=EYF&limit=200` -> Tüm Emeklilik Fonlarını (EYF) listeler.
 
 ---
 
@@ -49,15 +48,15 @@
 # Bağımlılıkları yükle
 pip install -r requirements.txt
 
-# API'yi başlat
+# API'yi başlat (Local: http://127.0.0.1:8000)
 uvicorn main:app --reload
 ```
 
 ### Sunucu Ayarları (Render / Docker)
-*   **API_KEY:** Yetkilendirme için gereklidir.
-*   **TWITTER_AUTH_TOKEN & CT0:** Sadece sosyal medya sentiment analizi kullanılacaksa gereklidir. Insight motoru için **zorunlu değildir**.
+*   **API_KEY:** `x-api-key` header'ı üzerinden zorunludur.
+*   **TWITTER_AUTH_TOKEN & CT0:** Sadece `/analysis/{symbol}/sentiment` (Sosyal Medya Analizi) uç noktası için opsiyoneldir. **Insight ve Temel özellikler için zorunlu değildir.**
 
 ---
 
 ## ⚠️ Yasal Uyarı
-Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** AI skorları algoritmik tahminlerdir, son karar yatırımcının kendisine aittir.
+Bu yazılım tarafından sağlanan tüm veriler eğitim ve bilgilendirme amaçlıdır. **Kesinlikle yatırım tavsiyesi niteliği taşımaz.** AI tahminleri hatalı olabilir, yatırım kararlarınızı profesyonel danışmanlara danışarak alınız.
