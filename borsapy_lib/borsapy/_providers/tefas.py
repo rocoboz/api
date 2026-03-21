@@ -196,7 +196,7 @@ class TEFASProvider(BaseProvider):
                 # Sort by weight descending
                 allocation.sort(key=lambda x: x["weight"], reverse=True)
 
-            risk_value = self._parse_int_or_none(fund_info.get("RISKDEGERI"))
+            risk_value = self._parse_int_or_none(fund_profile.get("RISKDEGERI") or fund_info.get("RISKDEGERI"))
             if risk_value is not None and not 1 <= risk_value <= 7:
                 risk_value = None
 

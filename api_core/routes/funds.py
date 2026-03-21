@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
@@ -11,6 +13,35 @@ from api_core.services.security import limiter
 router = APIRouter(prefix="/funds", tags=["funds"])
 
 
+def _enrich_rows_with_risk(rows: list[dict]):
+    if not rows:
+        return rows
+
+    def enrich(row: dict):
+        if row.get("risk_value") is not None and row.get("risk_source") == "reported":
+            return row
+        code = row.get("fund_code")
+        if not code:
+            return row
+        try:
+            info = Fund(code).info or {}
+            risk_value, risk_source = resolve_fund_risk(
+                info.get("risk_value"),
+                info.get("category"),
+                info.get("fund_type"),
+                info.get("name"),
+            )
+            if risk_value is not None:
+                row = {**row, "risk_value": risk_value, "risk_source": risk_source}
+        except Exception:
+            return row
+        return row
+
+    max_workers = min(8, max(1, len(rows)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(enrich, rows))
+
+
 @router.get("/list")
 def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offset: int = 0, envelope: bool = False):
     def fetch():
@@ -19,9 +50,10 @@ def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offs
         if df.empty:
             return []
         sliced = df.iloc[offset : offset + limit]
-        return [normalize_fund_row(row) for row in df_to_json(sliced)]
+        rows = [normalize_fund_row(row) for row in df_to_json(sliced)]
+        return _enrich_rows_with_risk(rows)
 
-    rows = get_cached_static(f"FUND_LIST_{fund_type}_{limit}_{offset}", fetch)
+    rows = get_cached_static(f"FUND_LIST_V2_{fund_type}_{limit}_{offset}", fetch)
     meta = pagination_meta(limit=limit, offset=offset, count=len(rows), fund_type=fund_type)
     response.headers["X-Limit"] = str(limit)
     response.headers["X-Offset"] = str(offset)
