@@ -1,100 +1,147 @@
-import httpx
-import time
+import json
 import os
 import sys
-from typing import Optional
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
-# Windows terminal UTF-8 support fix
-if sys.platform == "win32":
-    try:
-        # For Python 3.7+
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        # Fallback for older versions if needed
-        import codecs
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+import httpx
 
-# Rich implementation for colorful terminal output
-try:
-    from rich.console import Console
-    from rich.table import Table
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
+API_BASE_URL = os.getenv("API_BASE_URL")
+HEADERS = {"x-api-key": os.getenv("API_KEY", "OPEN")}
 
-# --- CONFIGURATION ---
-BASE_URL = "http://127.0.0.1:8000"
-API_KEY = "CHANGE_ME" 
-HEADERS = {"x-api-key": API_KEY}
-
-# Console setup with safe encoding
-if HAS_RICH:
-    console = Console(force_terminal=True, soft_wrap=True)
+if API_BASE_URL:
+    CLIENT_MODE = "remote"
+    client = httpx.Client(base_url=API_BASE_URL, headers=HEADERS, timeout=45.0)
 else:
-    class MockConsole:
-        def print(self, msg, *args, **kwargs): print(msg)
-    console = MockConsole()
+    CLIENT_MODE = "in-process"
+    sys.path.append(r"D:\vibecodding\api\borsapy-api")
+    from fastapi.testclient import TestClient
+    import main
 
-# Endpoint list to test: (Name, Path, Needs Key)
+    client = TestClient(main.app)
+
 ENDPOINTS = [
-    ("Ping (Health Check)", "/ping", False),
-    ("Stock Details (THYAO)", "/stocks/THYAO", True),
-    ("Simulated Depth (THYAO)", "/stocks/THYAO/depth", True),
-    ("KAP Disclosures (THYAO)", "/stocks/THYAO/disclosures", True),
-    ("Fund Deep Scan (TLY)", "/funds/TLY/estimated-return", True),
-    ("Market Breadth (A/D)", "/market/breadth", False),
-    ("Market Heatmap", "/market/heatmap", False),
-    ("Inflation Data", "/market/economy/inflation", False),
-    ("TCMB Rates", "/market/economy/rates", False),
-    ("Twitter Dynamic Auth Check", "/search/tweets?q=THYAO&limit=5", False),
-    ("Global Search", "/search?q=THYAO", False),
+    ("Ping", "/ping"),
+    ("Home", "/"),
+    ("Cache Stats", "/ops/cache"),
+    ("Health", "/ops/health"),
+    ("Ready", "/ops/ready"),
+    ("Stocks List", "/stocks/list?limit=3&offset=0"),
+    ("Stocks List Envelope", "/stocks/list?limit=3&offset=0&envelope=true"),
+    ("Stock Detail", "/stocks/THYAO"),
+    ("Stock History", "/stocks/THYAO/history?period=1mo&interval=1d"),
+    ("Stock Depth", "/stocks/THYAO/depth"),
+    ("Stock Disclosures", "/stocks/THYAO/disclosures?limit=3"),
+    ("Stock Compare", "/stocks/compare?symbols=THYAO,ASELS"),
+    ("Market Screener", "/market/screener?limit=3&offset=0"),
+    ("Stock Dividends", "/stocks/THYAO/dividends"),
+    ("Stock Financials", "/stocks/THYAO/financials?type=income"),
+    ("Technical Analysis", "/analysis/THYAO"),
+    ("Sentiment Analysis", "/analysis/THYAO/sentiment"),
+    ("Hybrid Insight", "/analysis/THYAO/insight"),
+    ("Funds List", "/funds/list?limit=3&offset=0"),
+    ("Funds List Envelope", "/funds/list?limit=3&offset=50&envelope=true"),
+    ("Fund Detail", "/funds/TLY"),
+    ("Fund History", "/funds/TLY/history?period=1mo"),
+    ("Fund Estimate", "/funds/TLY/estimated-return"),
+    ("Fund Screener", "/funds/screener?fund_type=YAT"),
+    ("Market Breadth", "/market/breadth"),
+    ("Market Heatmap", "/market/heatmap"),
+    ("Market Summary", "/market/summary"),
+    ("Home Highlights", "/home/highlights"),
+    ("TCMB Rates", "/market/economy/rates"),
+    ("Economic Calendar", "/market/economy/calendar?scope=today"),
+    ("VIOP List", "/viop/list?category=all"),
+    ("Inflation", "/market/economy/inflation"),
+    ("Tax Table", "/market/tax"),
+    ("Twitter Search", "/search/tweets?q=THYAO&limit=2"),
+    ("Unified Search", "/search?q=THYAO"),
+    ("Unified Search Envelope", "/search?q=THYAO&envelope=true"),
 ]
 
-def run_tests():
-    if HAS_RICH:
-        table = Table(title="[bold magenta]BorsaPy Ultimate API (v1.0.7) Health Report[/bold magenta]")
-        table.add_column("Uç Nokta (Endpoint)", style="cyan")
-        table.add_column("Status", style="bold")
-        table.add_column("Latency", justify="right")
-        table.add_column("Result Hint", style="dim")
-    else:
-        print(f"\n--- BorsaPy Ultimate API Health Report ({BASE_URL}) ---\n")
 
-    console.print(f"\n[bold blue]STARTING API TESTS: {BASE_URL}[/bold blue]\n")
+def summarize(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        if payload.get("error"):
+            return {"error": payload["error"]}
+        return {key: summarize(value) for key, value in list(payload.items())[:5]}
+    if isinstance(payload, list):
+        return {"len": len(payload), "first": summarize(payload[0]) if payload else None}
+    return payload
 
-    for name, path, needs_key in ENDPOINTS:
-        url = f"{BASE_URL}{path}"
-        start_time = time.time()
-        
+
+def null_count(payload: Any) -> int:
+    if payload is None:
+        return 1
+    if isinstance(payload, dict):
+        return sum(null_count(value) for value in payload.values())
+    if isinstance(payload, list):
+        return sum(null_count(value) for value in payload)
+    return 0
+
+
+def _get(path: str):
+    return client.get(path)
+
+
+def run_tests() -> int:
+    failures = 0
+    target = API_BASE_URL or "in-process TestClient"
+    print(f"Testing {target} ({CLIENT_MODE})\n")
+
+    for name, path in ENDPOINTS:
+        started = time.time()
         try:
-            req_headers = HEADERS if needs_key else {}
-            response = httpx.get(url, headers=req_headers, timeout=30.0)
-            latency = round(time.time() - start_time, 2)
-            
-            if response.status_code == 200:
-                status = "[green]OK[/green]" if HAS_RICH else "OK"
-                hint = "Success"
-            elif response.status_code == 403:
-                status = "[yellow]AUTH ERROR[/yellow]" if HAS_RICH else "AUTH ERROR"
-                hint = "Check API_KEY"
-            else:
-                status = f"[red]FAIL ({response.status_code})[/red]" if HAS_RICH else f"FAIL ({response.status_code})"
-                hint = f"Body: {response.text[:20]}"
-                
-        except Exception as e:
-            latency = round(time.time() - start_time, 2)
-            status = "[red]TIMEOUT/ERROR[/red]" if HAS_RICH else "ERROR"
-            hint = str(e)[:40]
+            response = _get(path)
+            elapsed = round(time.time() - started, 2)
+            content_type = response.headers.get("content-type", "")
+            body = response.json() if "application/json" in content_type else response.text
+            top_error = body.get("error") if isinstance(body, dict) else None
+            nulls = null_count(body)
 
-        if HAS_RICH:
-            table.add_row(name, status, f"{latency}s", hint)
-        else:
-            print(f"{name:35} | {status:15} | {latency:6}s | {hint}")
+            print(f"[{response.status_code}] {name} ({elapsed}s)")
+            print(json.dumps(summarize(body), ensure_ascii=False)[:1000])
+            print(f"null_count={nulls}")
 
-    if HAS_RICH:
-        console.print(table)
-    
-    console.print("\n[bold green]Tests Completed![/bold green]\n")
+            if response.status_code >= 400:
+                failures += 1
+            elif top_error and name not in {"Twitter Search", "Sentiment Analysis"}:
+                failures += 1
+            print("---")
+        except Exception as exc:
+            failures += 1
+            print(f"[ERR] {name}: {exc}")
+            print("---")
+
+    print(f"Failures: {failures}")
+    return failures
+
+
+def run_concurrency_smoke() -> int:
+    paths = [
+        "/market/summary",
+        "/market/screener?limit=5&offset=0",
+        "/funds/list?limit=50&offset=0",
+        "/stocks/THYAO/history?period=1mo&interval=1d",
+    ]
+    failures = 0
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = [executor.submit(_get, paths[index % len(paths)]) for index in range(48)]
+        for future in as_completed(futures):
+            try:
+                response = future.result()
+                if response.status_code >= 400:
+                    failures += 1
+            except Exception:
+                failures += 1
+    elapsed = round(time.time() - started, 2)
+    print(f"Concurrency smoke finished in {elapsed}s with {failures} failures")
+    return failures
+
 
 if __name__ == "__main__":
-    run_tests()
+    failures = run_tests()
+    failures += run_concurrency_smoke()
+    sys.exit(failures)

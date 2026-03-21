@@ -126,6 +126,19 @@ class TEFASProvider(BaseProvider):
         except (ValueError, TypeError):
             return None
 
+    @staticmethod
+    def _parse_int_or_none(value: Any) -> int | None:
+        """Parse integer-like values and preserve missing values as None."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            return int(float(value.replace(",", ".")))
+        except (ValueError, TypeError):
+            return None
+
     def get_fund_detail(self, fund_code: str, fund_type: str = "YAT") -> dict[str, Any]:
         """
         Get detailed information about a fund.
@@ -183,6 +196,10 @@ class TEFASProvider(BaseProvider):
                 # Sort by weight descending
                 allocation.sort(key=lambda x: x["weight"], reverse=True)
 
+            risk_value = self._parse_int_or_none(fund_info.get("RISKDEGERI"))
+            if risk_value is not None and not 1 <= risk_value <= 7:
+                risk_value = None
+
             detail = {
                 "fund_code": fund_code,
                 "name": fund_info.get("FONUNVAN", ""),
@@ -194,7 +211,7 @@ class TEFASProvider(BaseProvider):
                 "manager": fund_info.get("YONETICI", ""),
                 "fund_type": fund_info.get("FONTUR", ""),
                 "category": fund_info.get("FONKATEGORI", ""),
-                "risk_value": int(fund_info.get("RISKDEGERI", 0) or 0),
+                "risk_value": risk_value,
                 # Performance metrics
                 "return_1m": fund_return.get("GETIRI1A"),
                 "return_3m": fund_return.get("GETIRI3A"),
