@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
-from api_core.services.normalizers import clean_json_val, df_to_json, normalize_fund_row
+from api_core.services.normalizers import clean_json_val, df_to_json, normalize_fund_row, resolve_fund_risk
 from api_core.services.providers import Fund, Index, parse_fund_holdings_no_llm, screen_funds
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
@@ -49,7 +49,16 @@ def get_fund_detail(code: str):
             info = f.info
             if not info:
                 return {"error": "Fund not found"}
-            return {k: clean_json_val(v) for k, v in info.items()}
+            cleaned = {k: clean_json_val(v) for k, v in info.items()}
+            risk_value, risk_source = resolve_fund_risk(
+                cleaned.get("risk_value"),
+                cleaned.get("category"),
+                cleaned.get("fund_type"),
+                cleaned.get("name"),
+            )
+            cleaned["risk_value"] = risk_value
+            cleaned["risk_source"] = risk_source
+            return cleaned
         except Exception as exc:
             return {"error": str(exc)}
 
