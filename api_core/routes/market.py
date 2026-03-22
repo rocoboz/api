@@ -8,30 +8,50 @@ from api_core.services.normalizers import clean_json_val, df_to_json, normalize_
 from api_core.services.providers import Fund, Ticker, technical
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
-from api_core.routes.funds import list_funds
+from api_core.routes.funds import _list_funds_payload, list_funds
 from api_core.routes.economy import get_economic_calendar
 from api_core.routes.stocks import list_stocks
 
 router = APIRouter(tags=["market"])
 
 
-@router.get("/market/screener")
-def stock_screener(response: Response, template: str | None = None, limit: int = 100, offset: int = 0, sort: str | None = None, direction: str = "desc", envelope: bool = False):
-    def fetch():
-        try:
-            from tradingview_screener import Query as TvQuery
+def _stock_screener_payload(template: str | None = None, limit: int = 100, offset: int = 0, sort: str | None = None, direction: str = "desc"):
+    try:
+        from tradingview_screener import Query as TvQuery
 
-            q = TvQuery().set_markets("turkey").select("name", "close", "change", "volume", "price_book_ratio", "market_cap_basic", "price_earnings_ttm")
-            _, df = q.get_scanner_data()
-            if df.empty:
-                return []
-            df = df.rename(columns={"name": "symbol", "close": "price", "price_book_ratio": "pddd", "price_earnings_ttm": "pe", "market_cap_basic": "market_cap"})
-            if sort and sort in df.columns:
-                df = df.sort_values(sort, ascending=(direction == "asc"))
-            sliced = df.iloc[offset : offset + limit]
-            return [normalize_stock_row(row) for row in df_to_json(sliced)]
-        except Exception as exc:
-            return {"error": str(exc)}
+        q = TvQuery().set_markets("turkey").select("name", "close", "change", "volume", "price_book_ratio", "market_cap_basic", "price_earnings_ttm")
+        _, df = q.get_scanner_data()
+        if df.empty:
+            return []
+        df = df.rename(columns={"name": "symbol", "close": "price", "price_book_ratio": "pddd", "price_earnings_ttm": "pe", "market_cap_basic": "market_cap"})
+        if sort and sort in df.columns:
+            df = df.sort_values(sort, ascending=(direction == "asc"))
+        sliced = df.iloc[offset : offset + limit]
+        return [normalize_stock_row(row) for row in df_to_json(sliced)]
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _market_heatmap_payload():
+    try:
+        from tradingview_screener import Query as TvQuery
+
+        _, df = TvQuery().set_markets("turkey").select("name", "change", "volume", "sector").get_scanner_data()
+        if df.empty:
+            return []
+        heatmap = []
+        for _, row in df.head(50).iterrows():
+            heatmap.append({"symbol": str(row.get("name")), "change": round(float(row.get("change", 0)), 2), "volume": float(row.get("volume", 0)), "sector": str(row.get("sector", "N/A"))})
+        return heatmap
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.get("/market/screener")
+@limiter.limit("20/minute")
+def stock_screener(request: Request, response: Response, template: str | None = None, limit: int = 100, offset: int = 0, sort: str | None = None, direction: str = "desc", envelope: bool = False):
+    def fetch():
+        return _stock_screener_payload(template=template, limit=limit, offset=offset, sort=sort, direction=direction)
 
     payload = get_cached_market(f"SCREENER_V2_{template}_{limit}_{offset}_{sort}_{direction}", fetch)
     if isinstance(payload, dict) and payload.get("error"):
@@ -44,7 +64,8 @@ def stock_screener(response: Response, template: str | None = None, limit: int =
 
 
 @router.get("/analysis/{symbol}")
-def get_analysis_pro(symbol: str):
+@limiter.limit("20/minute")
+def get_analysis_pro(request: Request, response: Response, symbol: str):
     symbol = symbol.upper()
 
     def fetch():
@@ -78,7 +99,8 @@ def get_analysis_pro(symbol: str):
 
 
 @router.get("/analysis/{symbol}/sentiment")
-def get_sentiment_analysis(symbol: str):
+@limiter.limit("10/minute")
+def get_sentiment_analysis(request: Request, response: Response, symbol: str):
     def fetch():
         try:
             import os
@@ -101,7 +123,8 @@ def get_sentiment_analysis(symbol: str):
 
 
 @router.get("/analysis/{symbol}/insight")
-def get_hybrid_insight(symbol: str):
+@limiter.limit("10/minute")
+def get_hybrid_insight(request: Request, response: Response, symbol: str):
     symbol = symbol.upper()
 
     def fetch():
@@ -177,7 +200,7 @@ def get_hybrid_insight(symbol: str):
 
 @router.get("/market/breadth")
 @limiter.limit("5/minute")
-def get_market_breadth(request: Request):
+def get_market_breadth(request: Request, response: Response):
     def fetch():
         try:
             from tradingview_screener import Query as TvQuery
@@ -199,26 +222,17 @@ def get_market_breadth(request: Request):
 
 
 @router.get("/market/heatmap")
-def get_market_heatmap():
+@limiter.limit("15/minute")
+def get_market_heatmap(request: Request, response: Response):
     def fetch():
-        try:
-            from tradingview_screener import Query as TvQuery
-
-            _, df = TvQuery().set_markets("turkey").select("name", "change", "volume", "sector").get_scanner_data()
-            if df.empty:
-                return []
-            heatmap = []
-            for _, row in df.head(50).iterrows():
-                heatmap.append({"symbol": str(row.get("name")), "change": round(float(row.get("change", 0)), 2), "volume": float(row.get("volume", 0)), "sector": str(row.get("sector", "N/A"))})
-            return heatmap
-        except Exception as exc:
-            return {"error": str(exc)}
+        return _market_heatmap_payload()
 
     return get_cached_market("MARKET_HEATMAP", fetch)
 
 
 @router.get("/market/summary")
-def market_summary():
+@limiter.limit("20/minute")
+def market_summary(request: Request, response: Response):
     def fetch():
         try:
             from tradingview_screener import Query as TvQuery
@@ -234,9 +248,9 @@ def market_summary():
                 breadth = {"up": up, "down": down, "neutral": neutral, "ratio": round(up / down, 2) if down > 0 else up, "sentiment": "BULLISH" if up > down * 1.5 else ("BEARISH" if down > up * 1.5 else "NEUTRAL")}
         except Exception:
             breadth = {"up": 0, "down": 0, "neutral": 0, "ratio": 0, "sentiment": "NEUTRAL"}
-        heatmap = get_market_heatmap()
-        movers = stock_screener(Response(), limit=6, offset=0)
-        funds = list_funds(Response(), limit=6, offset=0)
+        heatmap = _market_heatmap_payload()
+        movers = _stock_screener_payload(limit=6, offset=0)
+        funds = _list_funds_payload(limit=6, offset=0)
         calendar = get_economic_calendar(scope="week")
         return api_ok({"breadth": breadth if isinstance(breadth, dict) else {}, "heatmap": heatmap if isinstance(heatmap, list) else [], "movers": movers if isinstance(movers, list) else [], "funds": funds if isinstance(funds, list) else [], "calendar": calendar[:6] if isinstance(calendar, list) else []})
 
@@ -244,10 +258,11 @@ def market_summary():
 
 
 @router.get("/home/highlights")
-def home_highlights():
+@limiter.limit("20/minute")
+def home_highlights(request: Request, response: Response):
     def fetch():
-        movers = stock_screener(Response(), limit=4, offset=0)
-        funds = list_funds(Response(), limit=4, offset=0)
+        movers = _stock_screener_payload(limit=4, offset=0)
+        funds = _list_funds_payload(limit=4, offset=0)
         return api_ok({"stocks": movers if isinstance(movers, list) else [], "funds": funds if isinstance(funds, list) else []})
 
     return get_cached_market("HOME_HIGHLIGHTS", fetch)

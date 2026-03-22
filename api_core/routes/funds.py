@@ -53,16 +53,21 @@ def _enrich_rows_with_details(rows: list[dict]):
         return list(executor.map(enrich, rows))
 
 
+def _list_funds_payload(fund_type: str = "YAT", limit: int = 50, offset: int = 0):
+    fetch_limit = max(offset + limit, 2000)
+    df = screen_funds(fund_type=fund_type, limit=fetch_limit)
+    if df.empty:
+        return []
+    sliced = df.iloc[offset : offset + limit]
+    rows = [normalize_fund_row(row) for row in df_to_json(sliced)]
+    return _enrich_rows_with_details(rows)
+
+
 @router.get("/list")
-def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offset: int = 0, envelope: bool = False):
+@limiter.limit("20/minute")
+def list_funds(request: Request, response: Response, fund_type: str = "YAT", limit: int = 50, offset: int = 0, envelope: bool = False):
     def fetch():
-        fetch_limit = max(offset + limit, 2000)
-        df = screen_funds(fund_type=fund_type, limit=fetch_limit)
-        if df.empty:
-            return []
-        sliced = df.iloc[offset : offset + limit]
-        rows = [normalize_fund_row(row) for row in df_to_json(sliced)]
-        return _enrich_rows_with_details(rows)
+        return _list_funds_payload(fund_type=fund_type, limit=limit, offset=offset)
 
     rows = get_cached_static(f"FUND_LIST_V3_{fund_type}_{limit}_{offset}", fetch)
     meta = pagination_meta(limit=limit, offset=offset, count=len(rows), fund_type=fund_type)
@@ -73,7 +78,8 @@ def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offs
 
 
 @router.get("/screener")
-def tefas_screener(response: Response, fund_type: str = "YAT", envelope: bool = False):
+@limiter.limit("20/minute")
+def tefas_screener(request: Request, response: Response, fund_type: str = "YAT", envelope: bool = False):
     def fetch():
         return [compact_payload(row) for row in df_to_json(screen_funds(fund_type=fund_type, limit=2000))]
 
@@ -83,7 +89,8 @@ def tefas_screener(response: Response, fund_type: str = "YAT", envelope: bool = 
 
 
 @router.get("/{code}")
-def get_fund_detail(code: str):
+@limiter.limit("30/minute")
+def get_fund_detail(request: Request, response: Response, code: str):
     code = code.upper()
 
     def fetch():
@@ -109,7 +116,8 @@ def get_fund_detail(code: str):
 
 
 @router.get("/{code}/history")
-def get_fund_history(code: str, period: str = "1mo"):
+@limiter.limit("20/minute")
+def get_fund_history(request: Request, response: Response, code: str, period: str = "1mo"):
     code = code.upper()
 
     def fetch():
@@ -127,7 +135,7 @@ def get_fund_history(code: str, period: str = "1mo"):
 
 @router.get("/{code}/estimated-return")
 @limiter.limit("10/minute")
-def get_fund_estimated_return(request: Request, code: str):
+def get_fund_estimated_return(request: Request, response: Response, code: str):
     code = code.upper()
 
     def fetch():

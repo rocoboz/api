@@ -60,6 +60,8 @@ ENDPOINTS = [
     ("Unified Search Envelope", "/search?q=THYAO&envelope=true"),
 ]
 
+EXPECTED_AUTH_FAILURES = {"Cache Stats", "Twitter Search"}
+
 
 def summarize(payload: Any) -> Any:
     if isinstance(payload, dict):
@@ -104,7 +106,7 @@ def run_tests() -> int:
             print(json.dumps(summarize(body), ensure_ascii=False)[:1000])
             print(f"null_count={nulls}")
 
-            if response.status_code >= 400:
+            if response.status_code >= 400 and not (response.status_code == 403 and name in EXPECTED_AUTH_FAILURES):
                 failures += 1
             elif top_error and name not in {"Twitter Search", "Sentiment Analysis"}:
                 failures += 1

@@ -17,7 +17,8 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
 @router.get("/list")
-def list_stocks(response: Response, limit: int = 50, offset: int = 0, envelope: bool = False):
+@limiter.limit("30/minute")
+def list_stocks(request: Request, response: Response, limit: int = 50, offset: int = 0, envelope: bool = False):
     def fetch():
         try:
             df = market.companies()
@@ -37,7 +38,8 @@ def list_stocks(response: Response, limit: int = 50, offset: int = 0, envelope: 
 
 
 @router.get("/compare")
-def compare(response: Response, symbols: str = Query(...), envelope: bool = False):
+@limiter.limit("20/minute")
+def compare(request: Request, response: Response, symbols: str = Query(...), envelope: bool = False):
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
 
     def fetch():
@@ -49,7 +51,8 @@ def compare(response: Response, symbols: str = Query(...), envelope: bool = Fals
 
 
 @router.get("/{symbol}")
-def get_stock(symbol: str):
+@limiter.limit("30/minute")
+def get_stock(request: Request, response: Response, symbol: str):
     symbol = symbol.upper()
 
     def fetch():
@@ -73,7 +76,8 @@ def get_stock(symbol: str):
 
 
 @router.get("/{symbol}/history")
-def get_history(symbol: str, period: str = "1mo", interval: str = "1d"):
+@limiter.limit("30/minute")
+def get_history(request: Request, response: Response, symbol: str, period: str = "1mo", interval: str = "1d"):
     symbol = symbol.upper()
 
     def fetch():
@@ -92,7 +96,7 @@ def get_history(symbol: str, period: str = "1mo", interval: str = "1d"):
 
 @router.get("/{symbol}/depth")
 @limiter.limit("10/minute")
-def get_simulated_depth(request: Request, symbol: str):
+def get_simulated_depth(request: Request, response: Response, symbol: str):
     symbol = symbol.upper()
 
     def fetch():
@@ -125,7 +129,8 @@ def get_simulated_depth(request: Request, symbol: str):
 
 
 @router.get("/{symbol}/disclosures")
-def get_disclosures(symbol: str, limit: int = 15):
+@limiter.limit("15/minute")
+def get_disclosures(request: Request, response: Response, symbol: str, limit: int = 15):
     def fetch():
         kap = get_kap_provider()
         return df_to_json(kap.get_disclosures(symbol, limit))
@@ -134,7 +139,8 @@ def get_disclosures(symbol: str, limit: int = 15):
 
 
 @router.get("/{symbol}/dividends")
-def get_dividends(symbol: str):
+@limiter.limit("20/minute")
+def get_dividends(request: Request, response: Response, symbol: str):
     symbol = symbol.upper()
 
     def fetch():
@@ -153,7 +159,8 @@ def get_dividends(symbol: str):
 
 
 @router.get("/{symbol}/financials")
-def get_financials(symbol: str, type: str = "income"):
+@limiter.limit("20/minute")
+def get_financials(request: Request, response: Response, symbol: str, type: str = "income"):
     symbol = symbol.upper()
 
     def fetch():

@@ -15,6 +15,8 @@ class Settings:
     redis_url: str | None = os.getenv("REDIS_URL")
     request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
     gzip_minimum_size: int = int(os.getenv("GZIP_MINIMUM_SIZE", "1024"))
+    rate_limit_default_per_minute: int = int(os.getenv("RATE_LIMIT_DEFAULT_PER_MINUTE", "60"))
+    rate_limit_application_per_minute: int = int(os.getenv("RATE_LIMIT_APPLICATION_PER_MINUTE", "300"))
     cors_allow_origins: tuple[str, ...] = tuple(filter(None, os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")))
     realtime_cache: CacheNamespaceConfig = CacheNamespaceConfig(maxsize=500, ttl_seconds=30)
     market_cache: CacheNamespaceConfig = CacheNamespaceConfig(maxsize=200, ttl_seconds=60)
