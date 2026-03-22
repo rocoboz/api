@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
-from api_core.services.normalizers import clean_json_val, df_to_json, normalize_fund_row, resolve_fund_risk
+from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json, normalize_fund_row, resolve_fund_risk
 from api_core.services.providers import Fund, Index, parse_fund_holdings_no_llm, screen_funds
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
@@ -13,29 +13,40 @@ from api_core.services.security import limiter
 router = APIRouter(prefix="/funds", tags=["funds"])
 
 
-def _enrich_rows_with_risk(rows: list[dict]):
+def _enrich_rows_with_details(rows: list[dict]):
     if not rows:
         return rows
 
     def enrich(row: dict):
-        if row.get("risk_value") is not None and row.get("risk_source") == "reported":
-            return row
         code = row.get("fund_code")
         if not code:
             return row
         try:
             info = Fund(code).info or {}
+            enriched = dict(row)
+
             risk_value, risk_source = resolve_fund_risk(
                 info.get("risk_value"),
                 info.get("category"),
                 info.get("fund_type"),
                 info.get("name"),
             )
+
+            # /funds/list source only includes period returns; fill realtime/detail fields
+            # from the per-fund detail payload so callers don't get avoidable nulls.
+            for field in ("price", "daily_return", "fund_size", "investor_count"):
+                if enriched.get(field) is None:
+                    enriched[field] = clean_json_val(info.get(field))
+
+            if enriched.get("change") is None:
+                enriched["change"] = clean_json_val(info.get("daily_return"))
+
             if risk_value is not None:
-                row = {**row, "risk_value": risk_value, "risk_source": risk_source}
+                enriched["risk_value"] = risk_value
+                enriched["risk_source"] = risk_source
         except Exception:
             return row
-        return row
+        return enriched
 
     max_workers = min(8, max(1, len(rows)))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -51,9 +62,9 @@ def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offs
             return []
         sliced = df.iloc[offset : offset + limit]
         rows = [normalize_fund_row(row) for row in df_to_json(sliced)]
-        return _enrich_rows_with_risk(rows)
+        return _enrich_rows_with_details(rows)
 
-    rows = get_cached_static(f"FUND_LIST_V2_{fund_type}_{limit}_{offset}", fetch)
+    rows = get_cached_static(f"FUND_LIST_V3_{fund_type}_{limit}_{offset}", fetch)
     meta = pagination_meta(limit=limit, offset=offset, count=len(rows), fund_type=fund_type)
     response.headers["X-Limit"] = str(limit)
     response.headers["X-Offset"] = str(offset)
@@ -64,7 +75,7 @@ def list_funds(response: Response, fund_type: str = "YAT", limit: int = 50, offs
 @router.get("/screener")
 def tefas_screener(response: Response, fund_type: str = "YAT", envelope: bool = False):
     def fetch():
-        return df_to_json(screen_funds(fund_type=fund_type, limit=2000))
+        return [compact_payload(row) for row in df_to_json(screen_funds(fund_type=fund_type, limit=2000))]
 
     rows = get_cached_market(f"FUND_SCREENER_{fund_type}", fetch)
     meta = {"fund_type": fund_type, "count": len(rows)}
@@ -90,7 +101,7 @@ def get_fund_detail(code: str):
             )
             cleaned["risk_value"] = risk_value
             cleaned["risk_source"] = risk_source
-            return cleaned
+            return compact_payload(cleaned)
         except Exception as exc:
             return {"error": str(exc)}
 

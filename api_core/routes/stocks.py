@@ -7,7 +7,8 @@ import pandas as pd
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
-from api_core.services.normalizers import clean_json_val, df_to_json, normalize_stock_row
+from api_core.services.enrichers import enrich_stock_row, enrich_stock_rows
+from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
 from api_core.services.providers import Ticker, Fund, get_kap_provider, market
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
@@ -23,11 +24,11 @@ def list_stocks(response: Response, limit: int = 50, offset: int = 0, envelope: 
             if df.empty:
                 return []
             sliced = df.iloc[offset : offset + limit]
-            return [normalize_stock_row(row) for row in df_to_json(sliced)]
+            return enrich_stock_rows(df_to_json(sliced))
         except Exception:
             return []
 
-    rows = get_cached_static(f"ST_LIST_{limit}_{offset}", fetch)
+    rows = get_cached_static(f"ST_LIST_V2_{limit}_{offset}", fetch)
     meta = pagination_meta(limit=limit, offset=offset, count=len(rows))
     response.headers["X-Limit"] = str(limit)
     response.headers["X-Offset"] = str(offset)
@@ -40,11 +41,7 @@ def compare(response: Response, symbols: str = Query(...), envelope: bool = Fals
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
 
     def fetch():
-        res = []
-        for symbol in sym_list:
-            tk = Ticker(symbol)
-            res.append({"symbol": symbol, "price": clean_json_val(tk.info.get("last_price")), "pe": clean_json_val(tk.info.get("pe"))})
-        return res
+        return [enrich_stock_row({"symbol": symbol, "name": symbol}) for symbol in sym_list]
 
     rows = get_cached_market(f"COMPARE_{symbols}", fetch)
     meta = {"count": len(rows), "symbols": sym_list}
@@ -70,7 +67,7 @@ def get_stock(symbol: str):
                 return {}
 
         info["details"] = get_cached_static(f"KAP_DETAILS_{symbol}", fetch_kap)
-        return {"symbol": symbol, "data": info}
+        return compact_payload({"symbol": symbol, "data": info})
 
     return get_cached_market(f"STOCK_{symbol}", fetch)
 
@@ -170,7 +167,7 @@ def get_financials(symbol: str, type: str = "income"):
                 df = tk.income_stmt
             if df is None or df.empty:
                 return {"error": "No data"}
-            return json.loads(df.to_json(date_format="iso"))
+            return compact_payload(json.loads(df.to_json(date_format="iso")))
         except Exception:
             return {"error": "Financial data currently unavailable"}
 

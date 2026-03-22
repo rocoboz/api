@@ -5,7 +5,8 @@ import os
 from fastapi import APIRouter, Query, Response
 
 from api_core.services.cache import get_cached_market, get_cached_static
-from api_core.services.normalizers import clean_json_val, df_to_json, normalize_fund_row, normalize_stock_row
+from api_core.services.enrichers import enrich_stock_rows
+from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json, normalize_fund_row
 from api_core.services.providers import Index, clear_twitter_auth, market, search_funds, search_tweets, set_twitter_auth
 from api_core.services.response import api_ok
 
@@ -42,17 +43,26 @@ def unified_search(response: Response, q: str, envelope: bool = False):
         try:
             stocks = market.search_companies(q)
             funds = search_funds(q, limit=10)
-            st_res = [normalize_stock_row(row) for row in df_to_json(stocks.head(10))]
-            f_res = [normalize_fund_row(row) for row in df_to_json(funds)]
+            st_res = enrich_stock_rows(df_to_json(stocks.head(10)))
+            f_res = [compact_payload(normalize_fund_row(row)) for row in df_to_json(funds)]
             indexes = []
             try:
                 for code in ["XU100", "XBANK", "XUSIN"]:
                     if q.upper() in code:
                         idx = Index(code)
-                        indexes.append({"symbol": code, "name": idx.info.get("short_name", code), "price": clean_json_val(idx.info.get("last_price")), "change": clean_json_val(idx.info.get("change_percent"))})
+                        indexes.append(
+                            compact_payload(
+                                {
+                                    "symbol": code,
+                                    "name": idx.info.get("short_name", code),
+                                    "price": clean_json_val(idx.info.get("last_price")),
+                                    "change": clean_json_val(idx.info.get("change_percent")),
+                                }
+                            )
+                        )
             except Exception:
                 pass
-            return {"stocks": st_res, "funds": f_res, "indexes": indexes, "total": len(st_res) + len(f_res) + len(indexes)}
+            return compact_payload({"stocks": st_res, "funds": f_res, "indexes": indexes, "total": len(st_res) + len(f_res) + len(indexes)})
         except Exception:
             return {"stocks": [], "funds": [], "indexes": [], "total": 0}
 

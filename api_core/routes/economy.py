@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from api_core.services.cache import get_cached_market, get_cached_static
-from api_core.services.normalizers import df_to_json
+from api_core.services.normalizers import compact_payload, df_to_json
 from api_core.services.providers import EconomicCalendar, Inflation, TCMB, VIOP, tax
 
 router = APIRouter(tags=["economy"])
@@ -11,7 +11,7 @@ router = APIRouter(tags=["economy"])
 def get_tcmb_rates():
     def fetch():
         try:
-            return df_to_json(TCMB().rates)
+            return [compact_payload(row) for row in df_to_json(TCMB().rates)]
         except Exception as exc:
             return {"error": f"TCMB Provider Error: {exc}"}
 
@@ -28,7 +28,7 @@ def get_economic_calendar(scope: str = "today"):
             df = cal.this_month()
         else:
             df = cal.today()
-        return df_to_json(df)
+        return [compact_payload(row) for row in df_to_json(df)]
 
     return get_cached_market(f"CALENDAR_{scope}", fetch)
 
@@ -48,7 +48,7 @@ def viop_list(category: str = "all"):
 def inflation_data():
     def fetch():
         inf = Inflation()
-        return {"tufe": inf.latest("tufe"), "ufe": inf.latest("ufe")}
+        return compact_payload({"tufe": inf.latest("tufe"), "ufe": inf.latest("ufe")})
 
     return get_cached_static("INFLATION", fetch)
 

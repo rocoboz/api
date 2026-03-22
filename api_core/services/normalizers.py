@@ -21,6 +21,27 @@ def clean_json_val(val: Any) -> Any:
     return val
 
 
+def first_clean_value(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            value = clean_json_val(row.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def compact_payload(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return {
+            key: compact_payload(value)
+            for key, value in payload.items()
+            if value is not None
+        }
+    if isinstance(payload, list):
+        return [compact_payload(item) for item in payload]
+    return payload
+
+
 def df_to_json(data: Any) -> list[dict[str, Any]]:
     if data is None:
         return []
@@ -85,16 +106,24 @@ def resolve_fund_risk(reported_risk: Any, *texts: Any) -> tuple[int | None, str 
 
 
 def normalize_stock_row(row: dict[str, Any]) -> dict[str, Any]:
+    price = first_clean_value(row, "price", "last_price", "last", "currentPrice", "regularMarketPrice")
+    change = first_clean_value(row, "change", "regularMarketChange")
+    change_percent = first_clean_value(row, "change_percent", "changePercent", "regularMarketChangePercent")
+    volume = first_clean_value(row, "volume", "regularMarketVolume")
+    market_cap = first_clean_value(row, "market_cap", "marketCap")
+    pe = first_clean_value(row, "pe", "pe_ratio", "trailingPE", "price_earnings_ttm")
+    pddd = first_clean_value(row, "pddd", "pb_ratio", "priceToBook", "price_book_ratio")
+
     return {
         "symbol": row.get("symbol") or row.get("ticker") or row.get("code") or row.get("name"),
         "name": row.get("long_name") or row.get("short_name") or row.get("name") or row.get("symbol") or row.get("ticker"),
-        "price": clean_json_val(row.get("price")),
-        "change": clean_json_val(row.get("change")),
-        "changePercent": clean_json_val(row.get("change")),
-        "volume": clean_json_val(row.get("volume")),
-        "market_cap": clean_json_val(row.get("market_cap")),
-        "pe": clean_json_val(row.get("pe")),
-        "pddd": clean_json_val(row.get("pddd")),
+        "price": price,
+        "change": change,
+        "changePercent": change_percent if change_percent is not None else change,
+        "volume": volume,
+        "market_cap": market_cap,
+        "pe": pe,
+        "pddd": pddd,
         "last_update": now_iso(),
     }
 
