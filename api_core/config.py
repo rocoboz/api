@@ -10,7 +10,7 @@ class CacheNamespaceConfig:
 
 @dataclass(frozen=True)
 class Settings:
-    api_key: str = os.getenv("API_KEY", "CHANGE_ME")
+    api_key: str = os.getenv("API_KEY", "OPEN")
     render_external_url: str | None = os.getenv("RENDER_EXTERNAL_URL")
     redis_url: str | None = os.getenv("REDIS_URL")
     request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
