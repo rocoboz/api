@@ -28,6 +28,7 @@ FastAPI tabanlı, BIST ve TEFAS odaklı, frontend dostu finans verisi katmanı. 
 - `CORS_ALLOW_ORIGINS`: virgülle ayrılmış origin listesi.
 - `TWITTER_AUTH_TOKEN`: opsiyonel Twitter auth.
 - `TWITTER_CT0`: opsiyonel Twitter ct0.
+- `EVDS_API_KEY`: TCMB EVDS API anahtarı (zaman serisi verilerini indirmek için gereklidir).
 
 ## Yerel Çalıştırma
 
@@ -97,6 +98,49 @@ python test_api.py
 - `/market/tax`
 - `/search`
 - `/search/tweets`
+
+### Crypto
+
+- `/crypto/list`
+- `/crypto/{symbol}`
+- `/crypto/{symbol}/history`
+
+### FX / Bank Rates
+
+- `/fx/list`
+- `/fx/{symbol}`
+- `/fx/{symbol}/history`
+- `/fx/{symbol}/bank-rates`
+- `/fx/{symbol}/bank-rate/{bank}`
+- `/fx/{symbol}/institution-rates`
+- `/fx/{symbol}/institution-rate/{institution}`
+
+### Bonds & Eurobonds
+
+- `/bonds/list`
+- `/bonds/risk-free-rate`
+- `/bonds/{maturity}`
+- `/eurobonds/list`
+- `/eurobonds/{isin}`
+- `/eurobonds/{isin}/history`
+
+### EVDS (CBRT TCMB Data)
+
+- `/evds/categories`
+- `/evds/search`
+- `/evds/datagroups`
+- `/evds/series`
+- `/evds/series/{code}`
+- `/evds/series/{code}/history`
+- `/evds/download`
+- `/evds/dashboard`
+- `/evds/announcements`
+
+### Portfolio & Backtest
+
+- `/portfolio/analysis` (POST)
+- `/portfolio/rebalance` (POST)
+- `/backtest/run` (POST)
 
 ## Response Contract
 
@@ -184,6 +228,13 @@ gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 2 --threads 4 --tim
 - `/search?q=THYAO`
 - `/funds/TLY`
 - `/stocks/THYAO/history?period=1mo&interval=1d`
+- `/crypto/list?quote=TRY`
+- `/fx/list`
+- `/bonds/list`
+- `/eurobonds/list?currency=USD`
+- `/evds/categories`
+- `/portfolio/analysis` (POST)
+- `/backtest/run` (POST)
 
 ## Notlar
 
