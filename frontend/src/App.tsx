@@ -598,7 +598,10 @@ sys.stderr = io.StringIO()
           <div className="flex items-center gap-2">
             <Brain className="w-6 h-6 text-purple-400 animate-pulse" />
             <div>
-              <h1 className="text-lg font-bold text-white tracking-tight">FinansAPI</h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-lg font-bold text-white tracking-tight">FinansAPI</h1>
+                <span className="text-[10px] font-mono bg-purple-900/60 text-purple-300 border border-purple-700/60 px-1.5 py-0.5 rounded font-bold">v3</span>
+              </div>
               <p className="text-xs text-neutral-400">Çoklu Ajan Kontrol Odası</p>
             </div>
           </div>
