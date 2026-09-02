@@ -98,30 +98,6 @@ def get_analysis_pro(request: Request, response: Response, symbol: str):
     return get_cached_market(f"ANALYSIS_PRO_V2_{symbol}", fetch)
 
 
-@router.get("/analysis/{symbol}/sentiment")
-@limiter.limit("10/minute")
-def get_sentiment_analysis(request: Request, response: Response, symbol: str):
-    def fetch():
-        try:
-            import os
-
-            env_token = os.getenv("TWITTER_AUTH_TOKEN")
-            env_ct0 = os.getenv("TWITTER_CT0")
-            if env_token and env_ct0:
-                from api_core.services.providers import set_twitter_auth, search_tweets
-
-                set_twitter_auth(auth_token=env_token, ct0=env_ct0)
-                tweets_df = search_tweets(symbol, limit=15)
-                if tweets_df.empty:
-                    return {"error": "No tweets found for sentiment"}
-                return {"symbol": symbol, "sentiment": analyze_sentiment(tweets_df["text"].tolist())}
-            return {"error": "Twitter Auth missing for sentiment engine"}
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    return get_cached_market(f"SENTIMENT_{symbol}", fetch)
-
-
 @router.get("/analysis/{symbol}/insight")
 @limiter.limit("10/minute")
 def get_hybrid_insight(request: Request, response: Response, symbol: str):
