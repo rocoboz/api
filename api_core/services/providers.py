@@ -12,9 +12,12 @@ if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
 try:
-    import fitz  # PyMuPDF
-except ImportError:  # pragma: no cover
-    fitz = None
+    import pymupdf as fitz
+except ImportError:
+    try:
+        import fitz
+    except ImportError:  # pragma: no cover
+        fitz = None
 
 from finans_core import (  # type: ignore
     Bond,
