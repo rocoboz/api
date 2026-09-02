@@ -2,17 +2,12 @@ services:
   - type: web
     name: finans-api
     runtime: python
-    plan: standard
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 2 --threads 4 --timeout 120
     envVars:
       - key: API_KEY
         sync: false
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: finans-cache
-          property: connectionString
       - key: RENDER_EXTERNAL_URL
         sync: false
       - key: REQUEST_TIMEOUT_SECONDS
@@ -21,8 +16,3 @@ services:
         value: "1024"
       - key: CORS_ALLOW_ORIGINS
         value: "*"
-
-  - type: redis
-    name: finans-cache
-    ipAllowList: []
-    plan: starter
