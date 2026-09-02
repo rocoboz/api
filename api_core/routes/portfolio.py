@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
 from api_core.services.response import api_ok
 from api_core.services.security import limiter
-from borsapy import Portfolio
+from finans_core import Portfolio
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 

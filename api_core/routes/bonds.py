@@ -6,7 +6,7 @@ from api_core.services.cache import get_cached_market, get_cached_static
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
 from api_core.services.response import api_ok
 from api_core.services.security import limiter
-from borsapy import Bond, bonds, risk_free_rate, Eurobond, eurobonds
+from finans_core import Bond, bonds, risk_free_rate, Eurobond, eurobonds
 
 router = APIRouter(tags=["bonds"])
 

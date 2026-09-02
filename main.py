@@ -1,11 +1,10 @@
 import os
 import sys
 
-# Ensure local borsapy_lib is prioritized over site-packages
+# Ensure base directory is in sys.path
 base_dir = os.path.dirname(os.path.abspath(__file__))
-lib_path = os.path.join(base_dir, "borsapy_lib")
-if os.path.exists(lib_path) and lib_path not in sys.path:
-    sys.path.insert(0, lib_path)
+if base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
 
 from api_core.app import create_app
 

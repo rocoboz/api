@@ -8,16 +8,15 @@ from typing import Any
 import httpx
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-lib_path = os.path.join(base_dir, "borsapy_lib")
-if os.path.exists(lib_path) and lib_path not in sys.path:
-    sys.path.insert(0, lib_path)
+if base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
 
 try:
     import fitz  # PyMuPDF
 except ImportError:  # pragma: no cover
     fitz = None
 
-from borsapy import (  # type: ignore
+from finans_core import (  # type: ignore
     Bond,
     Crypto,
     EconomicCalendar,
@@ -39,8 +38,8 @@ from borsapy import (  # type: ignore
     banks,
     metal_institutions,
 )
-from borsapy import market, tax, technical  # type: ignore
-from borsapy._providers.kap import get_kap_provider  # type: ignore
+from finans_core import market, tax, technical  # type: ignore
+from finans_core._providers.kap import get_kap_provider  # type: ignore
 
 
 def parse_fund_holdings_no_llm(fund_code: str):
