@@ -78,6 +78,8 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /stocks/{symbol}/disclosures` — Son KAP bildirimleri.
 * `GET /stocks/{symbol}/calendar` — Bilanço açıklama takvimi.
 * `GET /stocks/compare?symbols=THYAO,ASELS` — Çoklu hisse karşılaştırması.
+* `GET /stocks/movers` — **Günün en çok yükselen (gainers), düşen (losers) ve en hacimli hisseleri.**
+* `GET /stocks/indices/{code}` — **BIST 30, BIST 50, BIST 100 bileşen hisseleri ve canlı fiyatları** (Örn: `/stocks/indices/xu030`).
 * `GET /stocks/sectors` — **BIST sektör listesi ve endeks kodları** (Banka, Sanayi, Holding, Teknoloji vb.).
 * `GET /stocks/sectors/{sector}` — **Sektöre ait hisseler ve anlık fiyatları** (Örn: `/stocks/sectors/banka`).
 
@@ -92,6 +94,7 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /funds/screener` — Fon tipi ve getiri kriterlerine göre fon tarayıcı.
 
 ### 4. Piyasa, Taramalar & Hazır Stratejiler (`/market`)
+* `GET /market/overview` — **Tek ekranda tam piyasa özeti** (BIST endeksleri, Dolar/Euro, Altın, Seans durumu ve Günün yıldızları).
 * `GET /market/status` — **BIST canlı seans durumu** (Açık/Kapalı, seans aşaması ve çalışma saatleri).
 * `GET /market/presets` — Hazır teknik tarama stratejileri listesi.
 * `GET /market/presets/{preset_name}` — Hazır stratejiyi çalıştırır (`golden-cross`, `oversold`, `macd-bullish`, vb.).

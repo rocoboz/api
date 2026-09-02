@@ -221,6 +221,79 @@ def get_sector_stocks(request: Request, response: Response, sector: str, envelop
     return api_ok(data) if envelope else data
 
 
+@router.get("/movers")
+@limiter.limit("30/minute")
+def get_market_movers(request: Request, response: Response, limit: int = Query(5, ge=1, le=20)):
+    """Return top gaining, losing, and most actively traded BIST stocks of the day."""
+    def fetch():
+        try:
+            from tradingview_screener import Query as TvQuery
+
+            q = TvQuery().set_markets("turkey").select("name", "close", "change", "volume")
+            _, df = q.get_scanner_data()
+            if df.empty:
+                return {"count": 0, "gainers": [], "losers": [], "most_active": []}
+
+            df = df.dropna(subset=["change", "close", "volume"])
+            gainers = [
+                {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2), "volume": float(r["volume"])}
+                for _, r in df.sort_values("change", ascending=False).head(limit).iterrows()
+            ]
+            losers = [
+                {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2), "volume": float(r["volume"])}
+                for _, r in df.sort_values("change", ascending=True).head(limit).iterrows()
+            ]
+            most_active = [
+                {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2), "volume": float(r["volume"])}
+                for _, r in df.sort_values("volume", ascending=False).head(limit).iterrows()
+            ]
+
+            return {
+                "count": limit,
+                "gainers": gainers,
+                "losers": losers,
+                "most_active": most_active
+            }
+        except Exception as exc:
+            return {"error": str(exc), "count": 0, "gainers": [], "losers": [], "most_active": []}
+
+    return get_cached_market(f"STOCKS_MOVERS_{limit}", fetch)
+
+
+@router.get("/indices/{code}")
+@limiter.limit("30/minute")
+def get_index_constituents(request: Request, response: Response, code: str, envelope: bool = False):
+    """Return constituent stocks of standard BIST indices (e.g. XU030, XU050, XU100, XKTUM)."""
+    idx_code = code.upper().strip()
+    aliases = {
+        "BIST30": "XU030", "XU30": "XU030",
+        "BIST50": "XU050", "XU50": "XU050",
+        "BIST100": "XU100", "XU100": "XU100",
+        "BISTKATILIM": "XKTUM", "KATILIM": "XKTUM"
+    }
+    resolved = aliases.get(idx_code, idx_code)
+
+    def fetch():
+        try:
+            idx = Index(resolved)
+            comps = idx.components
+            if not comps:
+                return {"index_code": resolved, "count": 0, "companies": [], "error": f"Components not found for index {resolved}"}
+
+            enriched = [enrich_stock_row({"symbol": c["symbol"], "name": c.get("name", c["symbol"])}) for c in comps]
+            return {
+                "index_code": resolved,
+                "index_name": idx.info.get("name", resolved),
+                "count": len(enriched),
+                "companies": enriched
+            }
+        except Exception as exc:
+            return {"index_code": resolved, "error": str(exc)}
+
+    data = get_cached_static(f"INDEX_COMPONENTS_{resolved}", fetch)
+    return api_ok(data) if envelope else data
+
+
 @router.get("/{symbol}")
 @limiter.limit("30/minute")
 def get_stock(request: Request, response: Response, symbol: str):
