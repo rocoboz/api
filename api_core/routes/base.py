@@ -15,7 +15,7 @@ def home():
     return api_ok(
         {
             "service": "FinansAPI",
-            "version": "2.0.0",
+            "version": "3.0.0",
             "github": "https://github.com/rocoboz/api",
             "docs": "/docs",
         }

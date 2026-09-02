@@ -1,4 +1,4 @@
-# FinansAPI 🚀
+# FinansAPI v3.0 🚀
 
 BIST (Borsa İstanbul), TEFAS Yatırım Fonları, TCMB, Döviz, Altın, Kripto Para ve Tahvil piyasaları için geliştirilmiş yüksek performanslı, anahtarsız ve modüler finansal veri katmanı.
 
