@@ -207,14 +207,14 @@ def get_sector_stocks(request: Request, response: Response, sector: str, envelop
         if not companies:
             companies = matched_entry["fallback"]
 
-        enriched = [enrich_stock_row({"symbol": s, "name": s}) for s in companies]
+        stock_list = [{"symbol": s, "name": s} for s in companies]
         return {
             "sector": sec_key,
             "index_code": index_code,
             "name": matched_entry["name"],
             "description": matched_entry["description"],
-            "company_count": len(enriched),
-            "companies": enriched,
+            "company_count": len(stock_list),
+            "companies": stock_list,
         }
 
     data = get_cached_static(f"SECTOR_COMPONENTS_{index_code}", fetch)
@@ -280,12 +280,17 @@ def get_index_constituents(request: Request, response: Response, code: str, enve
             if not comps:
                 return {"index_code": resolved, "count": 0, "companies": [], "error": f"Components not found for index {resolved}"}
 
-            enriched = [enrich_stock_row({"symbol": c["symbol"], "name": c.get("name", c["symbol"])}) for c in comps]
+            companies = [{"symbol": c["symbol"], "name": c.get("name", c["symbol"])} for c in comps]
+            idx_name = resolved
+            try:
+                idx_name = idx.info.get("name", resolved)
+            except Exception:
+                pass
             return {
                 "index_code": resolved,
-                "index_name": idx.info.get("name", resolved),
-                "count": len(enriched),
-                "companies": enriched
+                "index_name": idx_name,
+                "count": len(companies),
+                "companies": companies,
             }
         except Exception as exc:
             return {"index_code": resolved, "error": str(exc)}
