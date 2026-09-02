@@ -421,13 +421,16 @@ def get_technical_indicators(request: Request, response: Response, symbol: str):
                 macd_val, macd_sig, macd_hist = None, None, None
 
             # Bollinger Bands (20, 2)
-            bb_df = technical.calculate_bollinger_bands(df, period=20, std=2)
-            if not bb_df.empty:
-                bb_upper = round(float(bb_df["Upper"].iloc[-1]), 2) if "Upper" in bb_df else None
-                bb_middle = round(float(bb_df["Middle"].iloc[-1]), 2) if "Middle" in bb_df else None
-                bb_lower = round(float(bb_df["Lower"].iloc[-1]), 2) if "Lower" in bb_df else None
-                bandwidth = round(((bb_upper - bb_lower) / bb_middle * 100), 2) if (bb_upper and bb_lower and bb_middle) else None
-            else:
+            try:
+                bb_df = technical.calculate_bollinger_bands(df, period=20, std_dev=2.0)
+                if not bb_df.empty:
+                    bb_upper = round(float(bb_df["BB_Upper"].iloc[-1]), 2) if "BB_Upper" in bb_df else None
+                    bb_middle = round(float(bb_df["BB_Middle"].iloc[-1]), 2) if "BB_Middle" in bb_df else None
+                    bb_lower = round(float(bb_df["BB_Lower"].iloc[-1]), 2) if "BB_Lower" in bb_df else None
+                    bandwidth = round(((bb_upper - bb_lower) / bb_middle * 100), 2) if (bb_upper and bb_lower and bb_middle) else None
+                else:
+                    bb_upper, bb_middle, bb_lower, bandwidth = None, None, None, None
+            except Exception:
                 bb_upper, bb_middle, bb_lower, bandwidth = None, None, None, None
 
             # Moving Averages
