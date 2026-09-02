@@ -714,17 +714,12 @@ class Backtest:
         equity_values = []
         dates = []
 
-        # Determine warmup period dynamically based on data size
-        warmup = min(self.WARMUP_PERIOD, len(self._df) - 1)
-        if warmup < 0:
-            warmup = 0
-
         # Buy & hold tracking
-        initial_price = self._df["Close"].iloc[warmup] if len(self._df) > warmup else 1.0
-        bh_shares = self.capital / initial_price if initial_price > 0 else 0.0
+        initial_price = self._df["Close"].iloc[self.WARMUP_PERIOD]
+        bh_shares = self.capital / initial_price
 
         # Run simulation
-        for idx in range(warmup, len(self._df)):
+        for idx in range(self.WARMUP_PERIOD, len(self._df)):
             candle = self._build_candle(idx)
             indicators = self._get_indicators_at(idx)
             price = candle["close"]
@@ -801,7 +796,7 @@ class Backtest:
         drawdown_curve = (equity_curve - running_max) / running_max
 
         # Buy & hold curve
-        bh_values = self._df["Close"].iloc[warmup:] * bh_shares
+        bh_values = self._df["Close"].iloc[self.WARMUP_PERIOD:] * bh_shares
         buy_hold_curve = pd.Series(bh_values.values, index=pd.DatetimeIndex(dates))
 
         return BacktestResult(

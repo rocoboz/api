@@ -266,3 +266,72 @@ def home_highlights(request: Request, response: Response):
         return api_ok({"stocks": movers if isinstance(movers, list) else [], "funds": funds if isinstance(funds, list) else []})
 
     return get_cached_market("HOME_HIGHLIGHTS", fetch)
+
+
+@router.get("/market/scan")
+@limiter.limit("10/minute")
+def scan_market(
+    request: Request,
+    response: Response,
+    universe: str = Query("XU030", description="Index code (e.g. XU100, XU030) or comma-separated symbols"),
+    condition: str = Query(..., description="Scan condition (e.g. 'rsi < 30', 'close > sma_50')"),
+    interval: str = Query("1d", description="Granularity ('1m', '5m', '15m', '30m', '1h', '4h', '1d', '1W', '1M')"),
+    limit: int = Query(100, description="Max result count")
+):
+    def fetch():
+        try:
+            from borsapy import scan
+            univ = [s.strip().upper() for s in universe.split(",")] if "," in universe else universe.upper()
+            df = scan(universe=univ, condition=condition, interval=interval, limit=limit)
+            if df.empty:
+                return []
+            return df_to_json(df)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_realtime(f"SCAN_{universe}_{condition}_{interval}_{limit}", fetch)
+
+
+def _fetch_rss(url: str, source_name: str, max_items: int = 10):
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            xml_data = response.read()
+        root = ET.fromstring(xml_data)
+        items = []
+        for item in root.findall(".//item")[:max_items]:
+            title = item.find("title")
+            link = item.find("link")
+            pub_date = item.find("pubDate") or item.find("date")
+            desc = item.find("description")
+            items.append({
+                "source": source_name,
+                "title": title.text.strip() if title is not None and title.text else "",
+                "link": link.text.strip() if link is not None and link.text else "",
+                "date": pub_date.text.strip() if pub_date is not None and pub_date.text else "",
+                "summary": desc.text.strip() if desc is not None and desc.text else ""
+            })
+        return items
+    except Exception:
+        return []
+
+
+@router.get("/market/news")
+@limiter.limit("10/minute")
+def get_market_news(request: Request, response: Response, local: bool = True, global_news: bool = True):
+    def fetch():
+        news_items = []
+        if local:
+            news_items.extend(_fetch_rss("https://www.bloomberght.com/rss", "Bloomberg HT", 10))
+        if global_news:
+            news_items.extend(_fetch_rss("https://www.cnbc.com/id/10000664/device/rss/rss.html", "CNBC Finance", 10))
+        return news_items
+
+    return get_cached_realtime(f"NEWS_{local}_{global_news}", fetch)
+
+

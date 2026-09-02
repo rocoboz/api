@@ -10,7 +10,7 @@ import httpx
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 lib_path = os.path.join(base_dir, "borsapy_lib")
 if os.path.exists(lib_path) and lib_path not in sys.path:
-    sys.path.append(lib_path)
+    sys.path.insert(0, lib_path)
 
 try:
     import fitz  # PyMuPDF

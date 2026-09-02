@@ -76,6 +76,8 @@ python test_api.py
 - `/funds/list`
 - `/funds/screener`
 - `/funds/{code}`
+- `/funds/{code}/allocation`
+- `/funds/{code}/allocation-history`
 - `/funds/{code}/history`
 - `/funds/{code}/estimated-return`
 

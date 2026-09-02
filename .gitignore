@@ -5,6 +5,26 @@ server.log
 .DS_Store
 venv/
 .env
+.env.local
+.env.*.local
+
+# Sensitive files
+*.pem
+*.key
+*.secret
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# pytest
+.pytest_cache/
 
 borsapy_lib/*
 !borsapy_lib/borsapy/
@@ -17,3 +37,16 @@ borsapy_lib/*.pyd
 borsapy_lib/*.dll
 
 agent-tools/
+
+# Frontend (React/Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.eslintcache

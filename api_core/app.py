@@ -24,6 +24,7 @@ from api_core.routes.bonds import router as bonds_router
 from api_core.routes.evds import router as evds_router
 from api_core.routes.portfolio import router as portfolio_router
 from api_core.routes.backtest import router as backtest_router
+from api_core.routes.ai import router as ai_router
 from api_core.services.observability import request_timing_middleware
 from api_core.services.security import limiter
 
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(evds_router)
     app.include_router(portfolio_router)
     app.include_router(backtest_router)
+    app.include_router(ai_router)
 
     @app.on_event("startup")
     async def startup_event():

@@ -77,11 +77,13 @@ def get_stock(request: Request, response: Response, symbol: str):
 
 @router.get("/{symbol}/history")
 @limiter.limit("30/minute")
-def get_history(request: Request, response: Response, symbol: str, period: str = "1mo", interval: str = "1d"):
+def get_history(request: Request, response: Response, symbol: str, period: str = "1mo", interval: str = "1d", asset_type: str | None = None):
     symbol = symbol.upper()
 
     def fetch():
-        if len(symbol) == 3:
+        # Use explicit asset_type if provided, otherwise default to stock
+        is_fund = asset_type == "fund" if asset_type else False
+        if is_fund:
             obj = Fund(symbol)
             df = obj.history(period=period)
         else:
@@ -91,7 +93,7 @@ def get_history(request: Request, response: Response, symbol: str, period: str =
             return {"error": "No data"}
         return df_to_json(df)
 
-    return get_cached_realtime(f"HIST_{symbol}_{period}_{interval}", fetch)
+    return get_cached_realtime(f"HIST_{symbol}_{period}_{interval}_{asset_type}", fetch)
 
 
 @router.get("/{symbol}/depth")
@@ -179,3 +181,101 @@ def get_financials(request: Request, response: Response, symbol: str, type: str 
             return {"error": "Financial data currently unavailable"}
 
     return get_cached_static(f"FIN_{symbol}_{type}", fetch)
+
+
+@router.get("/{symbol}/recommendations")
+@limiter.limit("20/minute")
+def get_recommendations(request: Request, response: Response, symbol: str):
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            try:
+                targets = tk.analyst_price_targets
+            except Exception:
+                targets = {}
+            try:
+                summary = tk.recommendations_summary
+            except Exception:
+                summary = {}
+            try:
+                rec = tk.recommendations
+            except Exception:
+                rec = {}
+            return compact_payload({
+                "symbol": symbol,
+                "targets": {k: clean_json_val(v) for k, v in targets.items()},
+                "summary": {k: clean_json_val(v) for k, v in summary.items()},
+                "overall": {k: clean_json_val(v) for k, v in rec.items()}
+            })
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"REC_{symbol}", fetch)
+
+
+@router.get("/{symbol}/holders")
+@limiter.limit("20/minute")
+def get_major_holders(request: Request, response: Response, symbol: str):
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            df = tk.major_holders
+            if df.empty:
+                return []
+            return df_to_json(df.reset_index())
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"HOLDERS_{symbol}", fetch)
+
+
+@router.get("/{symbol}/etfs")
+@limiter.limit("20/minute")
+def get_etf_holders(request: Request, response: Response, symbol: str):
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            df = tk.etf_holders
+            if df.empty:
+                return []
+            return df_to_json(df)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"ETFS_{symbol}", fetch)
+
+
+@router.get("/{symbol}/calendar")
+@limiter.limit("20/minute")
+def get_stock_calendar(request: Request, response: Response, symbol: str):
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            try:
+                cal_df = tk.calendar
+                cal = df_to_json(cal_df) if not cal_df.empty else []
+            except Exception:
+                cal = []
+            try:
+                earn_df = tk.earnings_dates
+                earn = df_to_json(earn_df.reset_index()) if not earn_df.empty else []
+            except Exception:
+                earn = []
+            return compact_payload({
+                "symbol": symbol,
+                "calendar": cal,
+                "earnings_dates": earn
+            })
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"CAL_{symbol}", fetch)
+
