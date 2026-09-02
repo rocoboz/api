@@ -119,7 +119,7 @@ def normalize_stock_row(row: dict[str, Any]) -> dict[str, Any]:
         "name": row.get("long_name") or row.get("short_name") or row.get("name") or row.get("symbol") or row.get("ticker"),
         "price": price,
         "change": change,
-        "changePercent": change_percent if change_percent is not None else change,
+        "changePercent": change_percent,
         "volume": volume,
         "market_cap": market_cap,
         "pe": pe,

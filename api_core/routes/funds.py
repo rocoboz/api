@@ -14,7 +14,7 @@ router = APIRouter(prefix="/funds", tags=["funds"])
 
 
 def _fund_allocation_rows(code: str) -> list[dict]:
-    """Resolve fund allocation rows across borsapy 0.8.x and 0.10.x shapes."""
+    """Resolve fund allocation rows across borsapy 0.8.x, 0.10.x and 0.11.x shapes."""
 
     def fetch():
         fund = Fund(code)
@@ -175,7 +175,7 @@ def get_fund_estimated_return(request: Request, response: Response, code: str):
         tefas_hisse_weight = sum(
             (a.get("weight", 0) / 100)
             for a in alloc
-            if any(x in str(a.get("asset_name", "")).lower() for x in ["hisse senedi", "stock", "equity"])
+            if any(x in f"{a.get('asset_name', '')} {a.get('asset_type', '')}".lower() for x in ["hisse senedi", "stock", "equity"])
         )
         if holdings:
             stocks_total_weight = 0
@@ -208,13 +208,14 @@ def get_fund_estimated_return(request: Request, response: Response, code: str):
             details.append({"asset": "BIST100 Proxy", "weight": round(hisse_weight * 100, 2), "daily_return": round(bist * 100, 2), "impact": round(hisse_weight * bist * 100, 4)})
             mode = "TEFAS Allocation Proxy"
         for item in alloc:
-            name = item.get("asset_name", "").lower()
+            name = f"{item.get('asset_name', '')} {item.get('asset_type', '')}".lower()
             weight = item.get("weight", 0) / 100
             if any(x in name for x in ["hisse senedi", "stock", "equity"]):
                 continue
-            if any(x in name for x in ["repo", "mevduat", "bono", "tahvil", "cash", "likit", "ters repo"]):
+            if any(x in name for x in ["repo", "mevduat", "bono", "tahvil", "cash", "likit", "ters repo", "reverse repo"]):
                 estimate += weight * daily_fixed
-                details.append({"asset": item.get("asset_name"), "weight": round(weight * 100, 2), "daily_return": round(daily_fixed * 100, 2), "impact": round(weight * daily_fixed * 100, 4)})
+                label = item.get("asset_type") or item.get("asset_name") or "Fixed Income/Cash"
+                details.append({"asset": label, "weight": round(weight * 100, 2), "daily_return": round(daily_fixed * 100, 2), "impact": round(weight * daily_fixed * 100, 4)})
         return {
             "fund_code": code,
             "estimated_daily_return": round(estimate * 100, 3),
@@ -225,3 +226,35 @@ def get_fund_estimated_return(request: Request, response: Response, code: str):
         }
 
     return get_cached_realtime(f"FUND_EST_{code}", fetch)
+
+
+@router.get("/{code}/allocation")
+@limiter.limit("20/minute")
+def get_fund_allocation(request: Request, response: Response, code: str):
+    code = code.upper()
+
+    def fetch():
+        try:
+            return _fund_allocation_rows(code)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"FUND_ALLOC_EP_{code}", fetch)
+
+
+@router.get("/{code}/allocation-history")
+@limiter.limit("15/minute")
+def get_fund_allocation_history(request: Request, response: Response, code: str, period: str = "1mo"):
+    code = code.upper()
+
+    def fetch():
+        try:
+            f = Fund(code)
+            df = f.allocation_history(period=period)
+            if df is None or df.empty:
+                return []
+            return df_to_json(df)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_market(f"FUND_ALLOC_HIST_{code}_{period}", fetch)

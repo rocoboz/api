@@ -79,6 +79,9 @@ class CacheNamespace:
             if key in self._memory:
                 return self._memory[key]
             value = func()
+            # Don't cache error results so they can be retried on next request
+            if isinstance(value, dict) and value.get("error"):
+                return value
             self._memory[key] = value
         self._set_redis(key, value)
         return value
