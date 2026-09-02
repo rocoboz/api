@@ -258,3 +258,34 @@ def get_fund_allocation_history(request: Request, response: Response, code: str,
             return {"error": str(exc)}
 
     return get_cached_market(f"FUND_ALLOC_HIST_{code}_{period}", fetch)
+
+
+@router.get("/{code}/holdings")
+@limiter.limit("30/minute")
+def get_fund_holdings(request: Request, response: Response, code: str, envelope: bool = False):
+    """Return specific stock holdings and portfolio weights for the given fund code parsed from KAP."""
+    code = code.upper()
+
+    def fetch():
+        holdings = parse_fund_holdings_no_llm(code)
+        if not holdings:
+            return {
+                "fund_code": code,
+                "stock_count": 0,
+                "total_stock_weight": 0.0,
+                "holdings": [],
+                "note": "KAP portföy dağılım raporu taranamadı veya fon hisse senedi taşımıyor."
+            }
+
+        sorted_holdings = sorted(holdings, key=lambda x: x.get("weight", 0), reverse=True)
+        total_weight = round(sum(h.get("weight", 0) for h in sorted_holdings), 2)
+        return {
+            "fund_code": code,
+            "stock_count": len(sorted_holdings),
+            "total_stock_weight": total_weight,
+            "holdings": sorted_holdings,
+        }
+
+    data = get_cached_static(f"FUND_HOLDINGS_DIRECT_{code}", fetch)
+    return api_ok(data) if envelope else data
+

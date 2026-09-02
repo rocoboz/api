@@ -84,6 +84,7 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /funds/{code}` — Fon anlık detayları, getiri oranları ve büyüklüğü.
 * `GET /funds/{code}/allocation` — Güncel portföy varlık dağılımı (Hisse, Bono, Döviz vb.).
 * `GET /funds/{code}/allocation-history` — Tarihsel portföy dağılım değişimi.
+* `GET /funds/{code}/holdings` — **KAP portföy dağılım raporundan taranan hisse senedi sepeti ve ağırlıkları.**
 * `GET /funds/{code}/history` — Tarihsel fon pay fiyatı grafiği.
 * `GET /funds/{code}/estimated-return` — BIST seansı esnasında anlık tahmini günlük getiri.
 * `GET /funds/screener` — Fon tipi ve getiri kriterlerine göre fon tarayıcı.

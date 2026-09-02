@@ -65,6 +65,7 @@ ENDPOINTS = [
     ("Fund Allocation", "/funds/TLY/allocation"),
     ("Fund Allocation History", "/funds/TLY/allocation-history?period=1mo"),
     ("Fund History", "/funds/TLY/history?period=1mo"),
+    ("Fund Stock Holdings", "/funds/TLY/holdings"),
     ("Fund Estimate", "/funds/TLY/estimated-return"),
     ("Fund Screener", "/funds/screener?fund_type=YAT"),
     ("Market Breadth", "/market/breadth"),
