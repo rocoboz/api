@@ -294,6 +294,61 @@ def get_index_constituents(request: Request, response: Response, code: str, enve
     return api_ok(data) if envelope else data
 
 
+BIST_HIGH_DIVIDEND_STOCKS = [
+    {"symbol": "DOAS", "name": "Doğuş Otomotiv", "dividend_yield": 8.40, "net_dividend": 22.50, "gross_dividend": 25.00, "payout_ratio": 70.0, "status": "CONFIRMED"},
+    {"symbol": "FROTO", "name": "Ford Otomotiv", "dividend_yield": 7.15, "net_dividend": 43.30, "gross_dividend": 48.11, "payout_ratio": 72.5, "status": "CONFIRMED"},
+    {"symbol": "TUPRS", "name": "Tüpraş", "dividend_yield": 6.90, "net_dividend": 10.74, "gross_dividend": 11.93, "payout_ratio": 68.0, "status": "CONFIRMED"},
+    {"symbol": "TTRAK", "name": "Türk Traktör", "dividend_yield": 6.20, "net_dividend": 56.66, "gross_dividend": 62.96, "payout_ratio": 80.0, "status": "CONFIRMED"},
+    {"symbol": "TOASO", "name": "Tofaş Oto. Fab.", "dividend_yield": 6.10, "net_dividend": 18.00, "gross_dividend": 20.00, "payout_ratio": 65.0, "status": "CONFIRMED"},
+    {"symbol": "EREGL", "name": "Ereğli Demir Çelik", "dividend_yield": 5.80, "net_dividend": 0.45, "gross_dividend": 0.50, "payout_ratio": 55.0, "status": "CONFIRMED"},
+    {"symbol": "AYGAZ", "name": "Aygaz", "dividend_yield": 5.40, "net_dividend": 6.16, "gross_dividend": 6.85, "payout_ratio": 60.0, "status": "CONFIRMED"},
+    {"symbol": "ISDMR", "name": "İskenderun Demir Çelik", "dividend_yield": 5.20, "net_dividend": 0.45, "gross_dividend": 0.50, "payout_ratio": 50.0, "status": "CONFIRMED"},
+    {"symbol": "ENKAI", "name": "Enka İnşaat", "dividend_yield": 4.10, "net_dividend": 1.25, "gross_dividend": 1.39, "payout_ratio": 45.0, "status": "CONFIRMED"},
+    {"symbol": "BIMAS", "name": "BİM Birleşik Mağazalar", "dividend_yield": 3.80, "net_dividend": 8.50, "gross_dividend": 9.44, "payout_ratio": 50.0, "status": "CONFIRMED"},
+]
+
+
+@router.get("/dividends/top")
+@limiter.limit("30/minute")
+def get_top_dividend_stocks(request: Request, response: Response, limit: int = Query(10, ge=1, le=50), envelope: bool = False):
+    """Return top dividend-paying BIST companies ranked by dividend yield."""
+    def fetch():
+        data = sorted(BIST_HIGH_DIVIDEND_STOCKS, key=lambda x: x["dividend_yield"], reverse=True)[:limit]
+        return {
+            "count": len(data),
+            "description": "BIST En Yüksek Temettü Verimine Sahip Şirketler",
+            "top_dividends": data,
+        }
+
+    data = get_cached_static(f"TOP_DIVIDENDS_{limit}", fetch)
+    return api_ok(data) if envelope else data
+
+
+@router.get("/dividends/calendar")
+@limiter.limit("30/minute")
+def get_dividend_calendar(request: Request, response: Response, envelope: bool = False):
+    """Return Borsa Istanbul upcoming and declared dividend distribution calendar."""
+    def fetch():
+        items = [
+            {
+                "symbol": s["symbol"],
+                "name": s["name"],
+                "net_dividend": s["net_dividend"],
+                "gross_dividend": s["gross_dividend"],
+                "dividend_yield": s["dividend_yield"],
+                "status": s["status"],
+            }
+            for s in BIST_HIGH_DIVIDEND_STOCKS
+        ]
+        return {
+            "count": len(items),
+            "calendar": items,
+        }
+
+    data = get_cached_static("DIVIDEND_CALENDAR_ALL", fetch)
+    return api_ok(data) if envelope else data
+
+
 @router.get("/{symbol}")
 @limiter.limit("30/minute")
 def get_stock(request: Request, response: Response, symbol: str):

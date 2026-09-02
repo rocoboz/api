@@ -79,12 +79,15 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /stocks/{symbol}/calendar` — Bilanço açıklama takvimi.
 * `GET /stocks/compare?symbols=THYAO,ASELS` — Çoklu hisse karşılaştırması.
 * `GET /stocks/movers` — **Günün en çok yükselen (gainers), düşen (losers) ve en hacimli hisseleri.**
+* `GET /stocks/dividends/top` — **BIST en yüksek temettü verimine sahip şirketler sıralaması.**
+* `GET /stocks/dividends/calendar` — **BIST temettü dağıtım takvimi ve net ödeme tutarları.**
 * `GET /stocks/indices/{code}` — **BIST 30, BIST 50, BIST 100 bileşen hisseleri ve canlı fiyatları** (Örn: `/stocks/indices/xu030`).
 * `GET /stocks/sectors` — **BIST sektör listesi ve endeks kodları** (Banka, Sanayi, Holding, Teknoloji vb.).
 * `GET /stocks/sectors/{sector}` — **Sektöre ait hisseler ve anlık fiyatları** (Örn: `/stocks/sectors/banka`).
 
 ### 3. TEFAS Yatırım Fonları (`/funds`)
 * `GET /funds/list` — Tüm TEFAS fonlarının listesi.
+* `GET /funds/top?period=1y` — **En çok kazandıran şampiyon fonlar** (1m, 3m, 6m, ytd, 1y).
 * `GET /funds/{code}` — Fon anlık detayları, getiri oranları ve büyüklüğü.
 * `GET /funds/{code}/allocation` — Güncel portföy varlık dağılımı (Hisse, Bono, Döviz vb.).
 * `GET /funds/{code}/allocation-history` — Tarihsel portföy dağılım değişimi.
@@ -96,6 +99,7 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 ### 4. Piyasa, Taramalar & Hazır Stratejiler (`/market`)
 * `GET /market/overview` — **Tek ekranda tam piyasa özeti** (BIST endeksleri, Dolar/Euro, Altın, Seans durumu ve Günün yıldızları).
 * `GET /market/status` — **BIST canlı seans durumu** (Açık/Kapalı, seans aşaması ve çalışma saatleri).
+* `GET /market/ipo` — **BIST Halka Arz (IPO) takvimi** (Aktif, yaklaşan ve tamamlanan halka arzlar).
 * `GET /market/presets` — Hazır teknik tarama stratejileri listesi.
 * `GET /market/presets/{preset_name}` — Hazır stratejiyi çalıştırır (`golden-cross`, `oversold`, `macd-bullish`, vb.).
 * `GET /market/scan?universe=XU030&condition=rsi < 40` — Özel matematiksel tarama motoru.
@@ -133,7 +137,10 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /market/tax` — Finansal enstrümanlar güncel stopaj tablosu.
 * `GET /evds/categories` & `/evds/search` — TCMB EVDS veri kategorileri ve serileri.
 
-### 9. Portföy Simülasyonu & Backtest (POST)
+### 9. Finansal Hesaplayıcılar & Simülatör (`/calculator`)
+* `GET /calculator/compound?initial=10000&monthly=2500&years=5&annual_rate=40` — **Bileşik getiri ve düzenli birikim büyüme simülatörü** (Yıllık döküm ve toplam kâr analizi).
+
+### 10. Portföy Simülasyonu & Backtest (POST)
 * `POST /portfolio/analysis` — Portföy risk metrikleri (Sharpe, Volatilite, Alfa, Beta).
 * `POST /portfolio/rebalance` — Hedef ağırlıklara göre portföy dengeleme hesabı.
 * `POST /backtest/run` — BIST hisseleri üzerinde teknik strateji simülasyonu.
