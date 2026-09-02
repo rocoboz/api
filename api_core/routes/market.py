@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query, Request, Response
 from api_core.services.analytics import analyze_sentiment
 from api_core.services.cache import get_cached_market, get_cached_realtime
 from api_core.services.normalizers import clean_json_val, df_to_json, normalize_fund_row, normalize_stock_row
-from api_core.services.providers import Fund, Ticker, technical
+from api_core.services.providers import FX, Fund, Index, Ticker, technical
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
 from api_core.routes.funds import _list_funds_payload, list_funds
@@ -131,6 +131,87 @@ def get_market_status(request: Request, response: Response):
             "closing_trades": "18:08 - 18:10",
         }
     }
+
+
+@router.get("/market/overview")
+@limiter.limit("60/minute")
+def get_market_overview(request: Request, response: Response):
+    """Return all-in-one market snapshot (BIST indices, currencies, gold, market status, and top movers)."""
+    def fetch():
+        from datetime import datetime, timezone, timedelta
+        tr_tz = timezone(timedelta(hours=3))
+        now = datetime.now(tr_tz)
+        weekday = now.weekday()
+        total_minutes = now.hour * 60 + now.minute
+        is_open = (weekday < 5) and ((10 * 60 <= total_minutes < 18 * 60) or (18 * 60 + 8 <= total_minutes < 18 * 60 + 10))
+        session_name = "WEEKEND" if weekday in (5, 6) else ("CONTINUOUS_AUCTION" if (10 * 60 <= total_minutes < 18 * 60) else "CLOSED")
+
+        indices_data = {}
+        for idx_sym in ["XU100", "XU030", "XBANK", "XUSIN"]:
+            try:
+                info = Index(idx_sym).info or {}
+                indices_data[idx_sym] = {
+                    "name": info.get("name", idx_sym),
+                    "last": info.get("last"),
+                    "change": info.get("change"),
+                    "change_percent": info.get("change_percent")
+                }
+            except Exception:
+                indices_data[idx_sym] = None
+
+        fx_data = {}
+        for fx_sym in ["USD", "EUR", "GBP"]:
+            try:
+                cur = FX(fx_sym).current or {}
+                fx_data[fx_sym] = {
+                    "rate": cur.get("last"),
+                    "change_percent": cur.get("change_percent") or cur.get("change")
+                }
+            except Exception:
+                fx_data[fx_sym] = None
+
+        gold_data = {}
+        try:
+            gram = FX("gram-altin").current or {}
+            gram_price = float(gram.get("last") or 0)
+            gold_data["gram_altin"] = round(gram_price, 2)
+            gold_data["ceyrek_altin"] = round(gram_price * 1.6065 * 1.04, 2) if gram_price > 0 else None
+            gold_data["ons_altin_usd"] = float(FX("ons-altin-usd").current.get("last") or 0)
+        except Exception:
+            pass
+
+        movers = {"gainers": [], "losers": []}
+        try:
+            from tradingview_screener import Query as TvQuery
+            _, df = TvQuery().set_markets("turkey").select("name", "close", "change", "volume").get_scanner_data()
+            if not df.empty:
+                df = df.dropna(subset=["change", "close"])
+                sorted_df = df.sort_values("change", ascending=False)
+                movers["gainers"] = [
+                    {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
+                    for _, r in sorted_df.head(3).iterrows()
+                ]
+                movers["losers"] = [
+                    {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
+                    for _, r in sorted_df.tail(3).iloc[::-1].iterrows()
+                ]
+        except Exception:
+            pass
+
+        return {
+            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "market_status": {
+                "is_open": is_open,
+                "session": session_name,
+                "timezone": "Europe/Istanbul (UTC+3)"
+            },
+            "indices": indices_data,
+            "currencies": fx_data,
+            "gold": gold_data,
+            "movers": movers
+        }
+
+    return get_cached_realtime("MARKET_OVERVIEW_V3", fetch)
 
 
 @router.get("/market/screener")
