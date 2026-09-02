@@ -119,6 +119,7 @@ python test_api.py
 ### FX / Bank Rates
 
 - `/fx/list`
+- `/fx/gold/all`
 - `/fx/{symbol}`
 - `/fx/{symbol}/history`
 - `/fx/{symbol}/bank-rates`
