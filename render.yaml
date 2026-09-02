@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: borsapy-api
+    name: finans-api
     runtime: python
     plan: standard
     buildCommand: pip install -r requirements.txt
@@ -11,7 +11,7 @@ services:
       - key: REDIS_URL
         fromService:
           type: redis
-          name: borsapy-cache
+          name: finans-cache
           property: connectionString
       - key: RENDER_EXTERNAL_URL
         sync: false
@@ -23,6 +23,6 @@ services:
         value: "*"
 
   - type: redis
-    name: borsapy-cache
+    name: finans-cache
     ipAllowList: []
     plan: starter

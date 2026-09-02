@@ -14,7 +14,7 @@ def ping():
 def home():
     return api_ok(
         {
-            "service": "BorsaPy Ultimate API",
+            "service": "FinansAPI",
             "version": "2.0.0",
             "github": "https://github.com/rocoboz/api",
             "docs": "/docs",

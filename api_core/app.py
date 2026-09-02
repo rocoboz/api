@@ -32,7 +32,7 @@ from api_core.services.security import limiter
 def create_app() -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     app = FastAPI(
-        title="BorsaPy Ultimate API",
+        title="FinansAPI",
         description="Professional Financial Gateway for Turkish Markets.",
         version="2.0.0",
     )

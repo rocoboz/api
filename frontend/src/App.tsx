@@ -45,7 +45,7 @@ const API_BASE = window.location.hostname === 'localhost' || window.location.hos
 const PYTHON_TEMPLATES = [
   {
     name: 'Temel İnceleme',
-    code: `# BorsaPy Python Code Interpreter (WebAssembly)
+    code: `# FinansAPI Python Code Interpreter (WebAssembly)
 # Tarayıcıda yerel Python motoru ile analiz yapın!
 
 import pandas as pd
@@ -114,7 +114,7 @@ for i in range(simulasyon_sayisi):
 export default function App() {
   // Chat History persistence in localStorage
   const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem('borsapy_chat_messages')
+    const saved = localStorage.getItem('finansapi_chat_messages') || localStorage.getItem('borsapy_chat_messages')
     if (saved) {
       try {
         return JSON.parse(saved)
@@ -125,15 +125,15 @@ export default function App() {
     return [
       {
         role: 'assistant',
-        content: 'Merhaba! BorsaPy Çoklu Ajan Analiz Odasına hoş geldiniz. Hangi hisse senedi veya fon hakkında analiz yapmak istersiniz? (Örn: "THYAO teknik analizi nasıldır?" veya "Son borsa haberleri neler?")'
+        content: 'Merhaba! FinansAPI Çoklu Ajan Analiz Odasına hoş geldiniz. Hangi hisse senedi veya fon hakkında analiz yapmak istersiniz? (Örn: "THYAO teknik analizi nasıldır?" veya "Son borsa haberleri neler?")'
       }
     ]
   })
 
   // Settings states stored in localStorage
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('borsapy_api_key') || '')
-  const [provider, setProvider] = useState(() => localStorage.getItem('borsapy_provider') || 'openai')
-  const [customModel, setCustomModel] = useState(() => localStorage.getItem('borsapy_model') || 'gpt-4.1-mini')
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('finansapi_api_key') || localStorage.getItem('borsapy_api_key') || '')
+  const [provider, setProvider] = useState(() => localStorage.getItem('finansapi_provider') || localStorage.getItem('borsapy_provider') || 'openai')
+  const [customModel, setCustomModel] = useState(() => localStorage.getItem('finansapi_model') || localStorage.getItem('borsapy_model') || 'gpt-4.1-mini')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   const [input, setInput] = useState('')
@@ -175,21 +175,21 @@ export default function App() {
 
   // Sync messages to local storage
   useEffect(() => {
-    localStorage.setItem('borsapy_chat_messages', JSON.stringify(messages))
+    localStorage.setItem('finansapi_chat_messages', JSON.stringify(messages))
   }, [messages])
 
   // Sync settings to local storage automatically
   useEffect(() => {
-    localStorage.setItem('borsapy_api_key', apiKey)
-    localStorage.setItem('borsapy_provider', provider)
-    localStorage.setItem('borsapy_model', customModel)
+    localStorage.setItem('finansapi_api_key', apiKey)
+    localStorage.setItem('finansapi_provider', provider)
+    localStorage.setItem('finansapi_model', customModel)
   }, [apiKey, provider, customModel])
 
   // Save Settings to local storage
   const saveSettings = (key: string, prov: string, model: string) => {
-    localStorage.setItem('borsapy_api_key', key)
-    localStorage.setItem('borsapy_provider', prov)
-    localStorage.setItem('borsapy_model', model)
+    localStorage.setItem('finansapi_api_key', key)
+    localStorage.setItem('finansapi_provider', prov)
+    localStorage.setItem('finansapi_model', model)
     setApiKey(key)
     setProvider(prov)
     setCustomModel(model)
@@ -201,7 +201,7 @@ export default function App() {
       setMessages([
         {
           role: 'assistant',
-          content: 'Merhaba! BorsaPy Çoklu Ajan Analiz Odasına hoş geldiniz. Hangi hisse senedi veya fon hakkında analiz yapmak istersiniz?'
+          content: 'Merhaba! FinansAPI Çoklu Ajan Analiz Odasına hoş geldiniz. Hangi hisse senedi veya fon hakkında analiz yapmak istersiniz?'
         }
       ])
     }
@@ -598,7 +598,7 @@ sys.stderr = io.StringIO()
           <div className="flex items-center gap-2">
             <Brain className="w-6 h-6 text-purple-400 animate-pulse" />
             <div>
-              <h1 className="text-lg font-bold text-white tracking-tight">BorsaPy</h1>
+              <h1 className="text-lg font-bold text-white tracking-tight">FinansAPI</h1>
               <p className="text-xs text-neutral-400">Çoklu Ajan Kontrol Odası</p>
             </div>
           </div>
@@ -652,7 +652,7 @@ sys.stderr = io.StringIO()
               AI
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">BorsaPy Asistan</h2>
+              <h2 className="text-sm font-semibold text-white">FinansAPI Asistan</h2>
               <p className="text-xs text-neutral-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Orkestratör Ajan Aktif
               </p>
