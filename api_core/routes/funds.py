@@ -109,6 +109,64 @@ def tefas_screener(request: Request, response: Response, fund_type: str = "YAT",
     return api_ok(rows, meta) if envelope else rows
 
 
+@router.get("/top")
+@limiter.limit("30/minute")
+def get_top_funds(
+    request: Request,
+    response: Response,
+    period: str = Query("1y", description="Return period: 1m, 3m, 6m, ytd, 1y, 3y, 5y"),
+    category: str | None = Query(None, description="Optional category filter (e.g. Hisse, Altın, Değişken, Serbest, Borçlanma)"),
+    limit: int = Query(5, ge=1, le=50, description="Number of top funds to return"),
+    envelope: bool = False,
+):
+    """Return top performing TEFAS funds ranked by return for the specified period."""
+    period_key = f"return_{period.lower()}"
+
+    def fetch():
+        try:
+            df = screen_funds(limit=2500)
+            if df.empty:
+                return {"period": period, "count": 0, "funds": []}
+
+            df.columns = [c.lower() for c in df.columns]
+
+            if period_key not in df.columns:
+                available_periods = [c.replace("return_", "") for c in df.columns if c.startswith("return_")]
+                return {"error": f"Invalid period '{period}'. Available: {available_periods}"}
+
+            df = df.dropna(subset=[period_key])
+
+            if category:
+                cat_lower = category.lower()
+                df = df[df["category"].str.lower().str.contains(cat_lower, na=False) | df["fund_type"].str.lower().str.contains(cat_lower, na=False)]
+
+            sorted_df = df.sort_values(by=period_key, ascending=False).head(limit)
+
+            top_funds = []
+            for rank, (_, row) in enumerate(sorted_df.iterrows(), start=1):
+                top_funds.append({
+                    "rank": rank,
+                    "fund_code": row.get("fund_code"),
+                    "name": row.get("name"),
+                    "category": row.get("category"),
+                    "return_rate": round(float(row.get(period_key, 0)), 2),
+                    "price": float(row.get("price", 0)) if row.get("price") else None,
+                    "fund_size": float(row.get("fund_size", 0)) if row.get("fund_size") else None
+                })
+
+            return {
+                "period": period,
+                "category": category or "ALL",
+                "count": len(top_funds),
+                "funds": top_funds
+            }
+        except Exception as exc:
+            return {"period": period, "error": str(exc), "funds": []}
+
+    data = get_cached_market(f"TOP_FUNDS_{period}_{category}_{limit}", fetch)
+    return api_ok(data) if envelope else data
+
+
 @router.get("/{code}")
 @limiter.limit("30/minute")
 def get_fund_detail(request: Request, response: Response, code: str):

@@ -214,6 +214,129 @@ def get_market_overview(request: Request, response: Response):
     return get_cached_realtime("MARKET_OVERVIEW_V3", fetch)
 
 
+BIST_IPO_CALENDAR = [
+    {
+        "company_name": "Bahadır Kimya Sanayi ve Ticaret A.Ş.",
+        "symbol": "BAHKM",
+        "status": "COMPLETED",
+        "offer_price": 51.0,
+        "offer_dates": "05-06-07 Ağustos 2024",
+        "lot_count": "16.000.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Tera Yatırım Menkul Değerler A.Ş.",
+        "market": "BIST Ana Pazar",
+        "trading_start_date": "13.08.2024"
+    },
+    {
+        "company_name": "Horoz Lojistik Kargo Hizmetleri A.Ş.",
+        "symbol": "HOROZ",
+        "status": "COMPLETED",
+        "offer_price": 55.0,
+        "offer_dates": "29-30-31 Mayıs 2024",
+        "lot_count": "24.600.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "QNB Finans Yatırım",
+        "market": "BIST Yıldız Pazar",
+        "trading_start_date": "07.06.2024"
+    },
+    {
+        "company_name": "Özata Denizcilik Sanayi ve Ticaret A.Ş.",
+        "symbol": "OZATD",
+        "status": "COMPLETED",
+        "offer_price": 105.0,
+        "offer_dates": "27-28-29 Ağustos 2024",
+        "lot_count": "13.350.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Vakıf Yatırım Menkul Değerler A.Ş.",
+        "market": "BIST Yıldız Pazar",
+        "trading_start_date": "05.09.2024"
+    },
+    {
+        "company_name": "Cem Zeytin A.Ş.",
+        "symbol": "CEMZY",
+        "status": "COMPLETED",
+        "offer_price": 15.30,
+        "offer_dates": "29-30 Ağustos - 02 Eylül 2024",
+        "lot_count": "100.000.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Bulls Yatırım Menkul Değerler A.Ş.",
+        "market": "BIST Yıldız Pazar",
+        "trading_start_date": "09.09.2024"
+    },
+    {
+        "company_name": "Durukan Şekerleme Sanayi ve Ticaret A.Ş.",
+        "symbol": "DURKN",
+        "status": "COMPLETED",
+        "offer_price": 17.0,
+        "offer_dates": "11-12 Eylül 2024",
+        "lot_count": "42.500.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Deniz Yatırım Menkul Kıymetler A.Ş.",
+        "market": "BIST Ana Pazar",
+        "trading_start_date": "17.09.2024"
+    },
+    {
+        "company_name": "Gündoğdu Gıda Süt Ürünleri San. ve Dış Tic. A.Ş.",
+        "symbol": "GUNDG",
+        "status": "COMPLETED",
+        "offer_price": 35.0,
+        "offer_dates": "15-16 Ağustos 2024",
+        "lot_count": "10.000.000 Lot",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Alnus Yatırım Menkul Değerler A.Ş.",
+        "market": "BIST Ana Pazar",
+        "trading_start_date": "22.08.2024"
+    },
+    {
+        "company_name": "Enda Enerji Holding A.Ş.",
+        "symbol": "ENDA",
+        "status": "UPCOMING",
+        "offer_price": None,
+        "offer_dates": "SPK Onayı Bekleniyor",
+        "lot_count": "Belirlenmedi",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Tacirler Yatırım",
+        "market": "BIST Yıldız Pazar",
+        "trading_start_date": None
+    },
+    {
+        "company_name": "Sümer Varlık Yönetim A.Ş.",
+        "symbol": "SUMER",
+        "status": "UPCOMING",
+        "offer_price": None,
+        "offer_dates": "Taslak İzahname Aşamasında",
+        "lot_count": "Belirlenmedi",
+        "distribution_method": "Eşit Dağıtım",
+        "lead_underwriter": "Şeker Yatırım",
+        "market": "BIST Ana Pazar",
+        "trading_start_date": None
+    }
+]
+
+
+@router.get("/market/ipo")
+@limiter.limit("30/minute")
+def get_ipo_calendar(request: Request, response: Response, status: str | None = None, envelope: bool = False):
+    """Return Borsa Istanbul (BIST) Initial Public Offerings (IPO / Halka Arz) calendar."""
+    ipos = BIST_IPO_CALENDAR
+    if status and status.upper() in ("COMPLETED", "UPCOMING", "ACTIVE"):
+        ipos = [item for item in ipos if item["status"] == status.upper()]
+
+    active_count = sum(1 for x in BIST_IPO_CALENDAR if x["status"] == "ACTIVE")
+    upcoming_count = sum(1 for x in BIST_IPO_CALENDAR if x["status"] == "UPCOMING")
+    completed_count = sum(1 for x in BIST_IPO_CALENDAR if x["status"] == "COMPLETED")
+
+    result = {
+        "count": len(ipos),
+        "total_tracked": len(BIST_IPO_CALENDAR),
+        "active_count": active_count,
+        "upcoming_count": upcoming_count,
+        "completed_count": completed_count,
+        "ipos": ipos
+    }
+    return api_ok(result) if envelope else result
+
+
 @router.get("/market/screener")
 @limiter.limit("20/minute")
 def stock_screener(request: Request, response: Response, template: str | None = None, limit: int = 100, offset: int = 0, sort: str | None = None, direction: str = "desc", envelope: bool = False):
