@@ -225,6 +225,20 @@ def _get_asset_price_in_try(asset_name: str) -> float | None:
     }
     resolved = gold_alias_map.get(sym_upper, sym)
 
+    # Fast path: check TCMB official rates for fiat currencies
+    if sym_upper in ("USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD", "SAR", "RUB", "KWD", "NOK", "SEK", "DKK"):
+        try:
+            from api_core.services.providers import TCMB
+            rates = TCMB().rates
+            if rates:
+                for row in rates:
+                    if (row.get("currency") == sym_upper or row.get("code") == sym_upper):
+                        rate_val = float(row.get("selling") or row.get("buying") or row.get("forex_selling") or 0)
+                        if rate_val > 0:
+                            return rate_val
+        except Exception:
+            pass
+
     try:
         data = FX(resolved).current
         if data and data.get("last"):
