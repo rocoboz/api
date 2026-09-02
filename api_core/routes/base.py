@@ -5,12 +5,12 @@ from api_core.services.response import api_ok
 router = APIRouter()
 
 
-@router.get("/ping")
+@router.api_route("/ping", methods=["GET", "HEAD"])
 def ping():
     return api_ok({"status": "ok"})
 
 
-@router.get("/")
+@router.api_route("/", methods=["GET", "HEAD"])
 def home():
     return api_ok(
         {

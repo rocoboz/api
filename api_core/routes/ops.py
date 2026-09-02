@@ -12,11 +12,11 @@ def cache_stats():
     return api_ok(cache_overview())
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return api_ok({"status": "healthy"})
 
 
-@router.get("/ready")
+@router.api_route("/ready", methods=["GET", "HEAD"])
 def ready():
     return api_ok({"status": "ready"})
