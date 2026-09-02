@@ -7,7 +7,7 @@ from api_core.services.cache import get_cached_market, get_cached_static
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
 from api_core.services.response import api_ok
 from api_core.services.security import limiter
-from borsapy import EVDS, EVDSSeries, evds_categories, evds_download, evds_search, set_evds_key
+from finans_core import EVDS, EVDSSeries, evds_categories, evds_download, evds_search, set_evds_key
 
 router = APIRouter(prefix="/evds", tags=["evds"])
 

@@ -280,7 +280,7 @@ def scan_market(
 ):
     def fetch():
         try:
-            from borsapy import scan
+            from finans_core import scan
             univ = [s.strip().upper() for s in universe.split(",")] if "," in universe else universe.upper()
             df = scan(universe=univ, condition=condition, interval=interval, limit=limit)
             if df.empty:
@@ -411,7 +411,7 @@ def run_preset(
 
     def fetch():
         try:
-            from borsapy import scan
+            from finans_core import scan
             univ = [s.strip().upper() for s in target_universe.split(",")] if "," in target_universe else target_universe
             df = scan(universe=univ, condition=condition, interval=interval, limit=limit)
             results = [] if df.empty else df_to_json(df)

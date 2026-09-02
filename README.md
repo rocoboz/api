@@ -1,255 +1,155 @@
-# FinansAPI
+# FinansAPI 🚀
 
-FastAPI tabanlı, BIST ve TEFAS odaklı, frontend dostu kurumsal finans verisi katmanı. API modüler yapıya taşındı, cache sistemi Redis-ready hale getirildi, route çakışmaları giderildi, null/0 semantiği netleştirildi ve Render deploy akışı production kullanıma uygunlaştırıldı.
+BIST (Borsa İstanbul), TEFAS Yatırım Fonları, TCMB, Döviz, Altın, Kripto Para ve Tahvil piyasaları için geliştirilmiş yüksek performanslı, anahtarsız ve modüler finansal veri katmanı.
 
-## Mimari
+---
 
-- `main.py`: ince entrypoint
-- `api_core/app.py`: FastAPI bootstrap, middleware, router registration
-- `api_core/routes/*`: stocks, funds, market, economy, search, ops, fx, crypto, bonds, portfolio, backtest
-- `api_core/services/*`: cache, security, providers, response, normalizers, analytics, observability
-- `borsapy_lib/`: finans veri motoru kütüphanesi
+## 🏗️ Proje Mimarisi
 
-## Temel Prensipler
+* **`main.py`**: Uygulama giriş noktası ve ASGI sunucu başlatıcısı.
+* **`api_core/`**: FastAPI rotaları, önbellek stratejileri, rate limiting ve yanıt modelleri.
+* **`finans_core/`**: Kamuya açık finansal veri kaynaklarını (KAP, İş Yatırım, TEFAS, TCMB, TradingView) normalize eden dahili veri motoru.
+* **`frontend/`**: React, Vite ve TailwindCSS ile geliştirilmiş yapay zeka destekli çoklu ajan analiz paneli.
 
-- Eksik veya güvenilmez veri `null` döner.
-- Gerçek sıfır olan hesap ve sayaçlar `0` olarak kalır.
-- Pahalı endpointlerde cache ve rate limit uygulanır.
-- Geriye uyumluluk korunur; çoğu eski endpoint ham JSON döndürmeye devam eder.
-- Yeni meta ihtiyacı olan listelerde `envelope=true` ile `success/data/error/meta` zarfı alınabilir.
+---
 
-## Ortam Değişkenleri
+## ⚡ Hızlı Başlangıç
 
-- `API_KEY`: API anahtarı. `OPEN` ise public kullanım açılır.
-- `REDIS_URL`: Redis bağlantısı. Boşsa memory cache fallback kullanılır.
-- `RENDER_EXTERNAL_URL`: keep-alive self ping için Render URL’i.
-- `REQUEST_TIMEOUT_SECONDS`: upstream timeout.
-- `GZIP_MINIMUM_SIZE`: gzip eşiği.
-- `CORS_ALLOW_ORIGINS`: virgülle ayrılmış origin listesi.
-- `TWITTER_AUTH_TOKEN`: opsiyonel Twitter auth.
-- `TWITTER_CT0`: opsiyonel Twitter ct0.
-- `EVDS_API_KEY`: TCMB EVDS API anahtarı (zaman serisi verilerini indirmek için gereklidir).
-
-## Yerel Çalıştırma
+### 1. Yerel Kurulum
 
 ```bash
+# Bağımlılıkları yükleyin
 pip install -r requirements.txt
+
+# API sunucusunu başlatın
 uvicorn main:app --reload
 ```
 
-Yerel doğrulama:
+Sunucu varsayılan olarak `http://127.0.0.1:8000` adresinde başlar.
+* **Etkileşimli Swagger Dokümantasyonu:** `http://127.0.0.1:8000/docs`
+* **Alternatif Dokümantasyon (ReDoc):** `http://127.0.0.1:8000/redoc`
+
+### 2. Testleri Çalıştırma
 
 ```bash
-python -m py_compile main.py
+# Yerel test
+python test_api.py
+
+# Canlı sunucuyu test etmek için
+set API_BASE_URL=https://sunucu-adresiniz.onrender.com
 python test_api.py
 ```
 
-Varsayılan smoke test hedefi `http://127.0.0.1:8000` adresidir. Canlı ortamı test etmek için:
+---
 
-```bash
-set API_BASE_URL=https://your-render-service.onrender.com
-python test_api.py
-```
+## ⚙️ Ortam Değişkenleri
 
-## Endpoint Grupları
+Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde tasarlanmıştır. İhtiyaca göre aşağıdaki değişkenler tanımlanabilir:
 
-### Ops
+| Değişken | Varsayılan | Açıklama |
+| :--- | :--- | :--- |
+| `API_KEY` | `OPEN` | API güvenlik anahtarı. `OPEN` bırakıldığında genel kullanıma açıktır. |
+| `REDIS_URL` | *(Boş)* | Redis bağlantı URL'i. Boş bırakılırsa bellek içi (in-memory) TTL önbellek kullanılır. |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Harici veri istekleri için zaman aşımı süresi (saniye). |
+| `CORS_ALLOW_ORIGINS` | `*` | İzin verilen CORS adresleri (virgülle ayrılmış). |
+| `EVDS_API_KEY` | *(Opsiyonel)* | TCMB EVDS serilerini indirmek için kullanıcı anahtarı. |
 
-- `/ping`
-- `/ops/cache`
-- `/ops/health`
-- `/ops/ready`
+---
 
-### Stocks
+## 📡 API Uç Noktaları
 
-- `/stocks/list`
-- `/stocks/compare`
-- `/stocks/{symbol}`
-- `/stocks/{symbol}/history`
-- `/stocks/{symbol}/depth`
-- `/stocks/{symbol}/disclosures`
-- `/stocks/{symbol}/dividends`
-- `/stocks/{symbol}/financials`
-- `/stocks/{symbol}/health`
-- `/stocks/{symbol}/recommendations`
-- `/stocks/{symbol}/holders`
-- `/stocks/{symbol}/etfs`
-- `/stocks/{symbol}/calendar`
+### 1. Sistem & Sağlık (`/ops`)
+* `GET /ping` — Servis canlılık kontrolü.
+* `GET /ops/health` — Sistem kaynakları ve önbellek sağlık durumu.
+* `GET /ops/cache` — Bellek ve Redis önbellek istatistikleri.
+* `GET /ops/ready` — Servis hazır olma durumu.
 
-### Funds
+### 2. Hisse Senetleri (`/stocks`)
+* `GET /stocks/list` — BIST şirketler listesi (sayfalama destekli).
+* `GET /stocks/{symbol}` — Anlık fiyat, hacim ve şirket künyesi (Örn: `THYAO`).
+* `GET /stocks/{symbol}/history` — Tarihsel grafik ve mum verileri (`period`, `interval`).
+* `GET /stocks/{symbol}/health` — **Piotroski F-Score** ve finansal sağlık analizi (0-9 puan & derecelendirme).
+* `GET /stocks/{symbol}/financials` — Bilanço ve gelir tablosu verileri.
+* `GET /stocks/{symbol}/depth` — Anlık derinlik ve kademe verileri.
+* `GET /stocks/{symbol}/dividends` — Geçmiş temettü ödemeleri ve verimleri.
+* `GET /stocks/{symbol}/recommendations` — Hedef fiyatlar ve analist tavsiyeleri.
+* `GET /stocks/{symbol}/holders` — Şirket ortaklık yapısı ve büyük pay sahipleri.
+* `GET /stocks/{symbol}/etfs` — Hissede pozisyonu olan TEFAS fonları.
+* `GET /stocks/{symbol}/disclosures` — Son KAP bildirimleri.
+* `GET /stocks/{symbol}/calendar` — Bilanço açıklama takvimi.
+* `GET /stocks/compare?symbols=THYAO,ASELS` — Çoklu hisse karşılaştırması.
 
-- `/funds/list`
-- `/funds/screener`
-- `/funds/{code}`
-- `/funds/{code}/allocation`
-- `/funds/{code}/allocation-history`
-- `/funds/{code}/history`
-- `/funds/{code}/estimated-return`
+### 3. TEFAS Yatırım Fonları (`/funds`)
+* `GET /funds/list` — Tüm TEFAS fonlarının listesi.
+* `GET /funds/{code}` — Fon anlık detayları, getiri oranları ve büyüklüğü.
+* `GET /funds/{code}/allocation` — Güncel portföy varlık dağılımı (Hisse, Bono, Döviz vb.).
+* `GET /funds/{code}/allocation-history` — Tarihsel portföy dağılım değişimi.
+* `GET /funds/{code}/history` — Tarihsel fon pay fiyatı grafiği.
+* `GET /funds/{code}/estimated-return` — BIST seansı esnasında anlık tahmini günlük getiri.
+* `GET /funds/screener` — Fon tipi ve getiri kriterlerine göre fon tarayıcı.
 
-### Market / Analysis
+### 4. Piyasa, Taramalar & Hazır Stratejiler (`/market`)
+* `GET /market/presets` — Hazır teknik tarama stratejileri listesi.
+* `GET /market/presets/{preset_name}` — Hazır stratejiyi çalıştırır (`golden-cross`, `oversold`, `macd-bullish`, vb.).
+* `GET /market/scan?universe=XU030&condition=rsi < 40` — Özel matematiksel tarama motoru.
+* `GET /market/screener` — Temel ve teknik filtrelerle hisse tarama.
+* `GET /market/breadth` — Piyasa genel genişliği (yükselen/düşen oranı).
+* `GET /market/heatmap` — Sektörel getiri ısı haritası.
+* `GET /market/summary` — Endeksler, en çok artanlar/azalanlar ve piyasa özeti.
+* `GET /market/news` — Güncel BIST ve ekonomi haber akışı.
+* `GET /analysis/{symbol}` — Otomatik teknik sinyal özeti.
 
-- `/market/screener`
-- `/market/breadth`
-- `/market/heatmap`
-- `/market/summary`
-- `/market/scan`
-- `/market/presets`
-- `/market/presets/{preset_name}`
-- `/market/news`
-- `/home/highlights`
-- `/analysis/{symbol}`
-- `/analysis/{symbol}/sentiment`
-- `/analysis/{symbol}/insight`
+### 5. Döviz & Altın Matrisi (`/fx`)
+* `GET /fx/list` — Desteklenen para birimleri ve kurumlar.
+* `GET /fx/gold/all` — **Tüm altın türleri matrisi** (Gram, 22 Ayar Bilezik, 18/14 Ayar, Çeyrek, Yarım, Tam, Ata, Gremse, Reşat, Ons).
+* `GET /fx/{asset}` — Döviz veya altın anlık kuru (Örn: `USD`, `gram-altin`, `22-ayar-bilezik`).
+* `GET /fx/{asset}/history` — Tarihsel döviz/altın grafiği.
+* `GET /fx/{asset}/bank-rates` — Bankaların anlık alış-satış kurları ve makas farkları.
+* `GET /fx/{asset}/institution-rates` — Kapalıçarşı ve serbest piyasa kurum kurları.
 
-### Economy / Search
+### 6. Kripto Para (`/crypto`)
+* `GET /crypto/list` — BIST/TRY ve USDT bazlı kripto para çiftleri.
+* `GET /crypto/{symbol}` — Anlık kripto fiyatı (Örn: `BTCTRY`).
+* `GET /crypto/{symbol}/history` — Kripto para mum geçmişi.
 
-- `/market/economy/rates`
-- `/market/economy/calendar`
-- `/market/economy/inflation`
-- `/market/tax`
-- `/search`
-- `/search/tweets`
+### 7. Tahvil, Bono & Eurobond (`/bonds`)
+* `GET /bonds/list` — Gösterge devlet tahvili faiz oranları.
+* `GET /bonds/risk-free-rate` — Piyasa risksiz faiz oranı (RFR).
+* `GET /eurobonds/list` — Türkiye Eurobond getirileri ve kupon oranları.
 
-### Crypto
+### 8. Ekonomi Takvimi & TCMB (`/market/economy`)
+* `GET /market/economy/rates` — TCMB resmi kurları.
+* `GET /market/economy/calendar` — Günlük/haftalık ekonomik takvim.
+* `GET /market/economy/inflation` — TÜİK resmi TÜFE enflasyon oranları ve hesaplayıcı.
+* `GET /market/tax` — Finansal enstrümanlar güncel stopaj tablosu.
+* `GET /evds/categories` & `/evds/search` — TCMB EVDS veri kategorileri ve serileri.
 
-- `/crypto/list`
-- `/crypto/{symbol}`
-- `/crypto/{symbol}/history`
+### 9. Portföy Simülasyonu & Backtest (POST)
+* `POST /portfolio/analysis` — Portföy risk metrikleri (Sharpe, Volatilite, Alfa, Beta).
+* `POST /portfolio/rebalance` — Hedef ağırlıklara göre portföy dengeleme hesabı.
+* `POST /backtest/run` — BIST hisseleri üzerinde teknik strateji simülasyonu.
 
-### FX / Bank Rates
+---
 
-- `/fx/list`
-- `/fx/gold/all`
-- `/fx/{symbol}`
-- `/fx/{symbol}/history`
-- `/fx/{symbol}/bank-rates`
-- `/fx/{symbol}/bank-rate/{bank}`
-- `/fx/{symbol}/institution-rates`
-- `/fx/{symbol}/institution-rate/{institution}`
+## 💻 Yanıt Formatı (Response Structure)
 
-### Bonds & Eurobonds
-
-- `/bonds/list`
-- `/bonds/risk-free-rate`
-- `/bonds/{maturity}`
-- `/eurobonds/list`
-- `/eurobonds/{isin}`
-- `/eurobonds/{isin}/history`
-
-### EVDS (CBRT TCMB Data)
-
-- `/evds/categories`
-- `/evds/search`
-- `/evds/datagroups`
-- `/evds/series`
-- `/evds/series/{code}`
-- `/evds/series/{code}/history`
-- `/evds/download`
-- `/evds/dashboard`
-- `/evds/announcements`
-
-### Portfolio & Backtest
-
-- `/portfolio/analysis` (POST)
-- `/portfolio/rebalance` (POST)
-- `/backtest/run` (POST)
-
-## Response Contract
-
-### Envelope kullanan endpointler
-
-- `/ping`
-- `/`
-- `/ops/*`
-- `/market/summary`
-- `/home/highlights`
-- `envelope=true` verilen liste/search endpointleri
-
-Örnek:
+İsteğe bağlı olarak liste uç noktalarında `envelope=true` parametresi gönderilerek standart zarf yapısı alınabilir:
 
 ```json
 {
   "success": true,
-  "data": [],
+  "data": [ ... ],
   "error": null,
   "meta": {
     "limit": 50,
     "offset": 0,
-    "count": 50,
-    "generated_at": "2026-03-21T21:00:00+03:00"
+    "count": 50
   }
 }
 ```
 
-### Geriye uyumlu ham endpointler
+---
 
-- Çoğu mevcut liste ve detay endpointi varsayılan olarak ham JSON döndürür.
-- `funds/list`, `stocks/list`, `market/screener`, `search`, `stocks/compare` için `envelope=true` desteklenir.
-
-## Cache ve Rate Limit
-
-- Realtime cache: 30 saniye
-- Market cache: 60 saniye
-- Static cache: 24 saat
-- Redis varsa shared cache kullanılır, yoksa memory fallback çalışır.
-- Pahalı endpointler:
-  - `/funds/{code}/estimated-return`
-  - `/stocks/{symbol}/depth`
-  - `/market/breadth`
-- Bu endpointlerde limit daha sıkıdır.
-
-## Nullable Alanlar
-
-Aşağıdaki alanlar upstream kaynak boş verdiğinde `null` dönebilir:
-
-- `risk_value`
-- `price`
-- `change`
-- `daily_return`
-- `return_ytd`
-- `pe`
-- `pddd`
-- `market_cap`
-- `volume`
-
-Bu durum mapping hatası değil, veri kaynağının boş veya güvenilmez değer dönmesidir.
-
-## Render Deploy
-
-Bu repo `render.yaml` içerir. Önerilen kurulum:
-
-1. GitHub’a push et
-2. Render’da Blueprint deploy kullan
-3. Web service + Redis service birlikte oluşsun
-4. Env değerlerini doğrula
-5. Deploy sonrası smoke test çalıştır
-
-Start command:
-
-```bash
-gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 2 --threads 4 --timeout 120
-```
-
-## Deploy Sonrası Kontrol Listesi
-
-- `/ping`
-- `/ops/cache`
-- `/stocks/list?limit=3&offset=0`
-- `/funds/list?limit=3&offset=50`
-- `/market/summary`
-- `/search?q=THYAO`
-- `/funds/TLY`
-- `/stocks/THYAO/history?period=1mo&interval=1d`
-- `/crypto/list?quote=TRY`
-- `/fx/list`
-- `/bonds/list`
-- `/eurobonds/list?currency=USD`
-- `/evds/categories`
-- `/portfolio/analysis` (POST)
-- `/backtest/run` (POST)
-
-## Notlar
-
-- Redis yoksa API çalışır, ama çoklu instance senaryosunda shared cache avantajı kaybolur.
-- 1000 kullanıcı kapasitesi yalnız app koduna bağlı değildir; Render planı, upstream rate limit ve Redis kullanımı belirleyicidir.
-- Kamuya açık veri sağlayıcılarından beslenildiği için bazı anlık veri boşlukları uygulama yerine veri kaynağına bağlı olabilir.
+## 🔒 Güvenlik & Gizlilik
+* Bu proje **açık kaynaklı ve kamuya açık (public)** çalışacak şekilde geliştirilmiştir.
+* Kod tabanında hiçbir sabit token, şifre veya özel bağlantı barındırılmaz.

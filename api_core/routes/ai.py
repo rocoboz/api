@@ -179,7 +179,7 @@ def _fetch_disclosures(symbol: str, limit: int = 15) -> Any:
 def _fetch_market_scan(universe: str = "XU030", condition: str = "", interval: str = "1d", limit: int = 100) -> Any:
     def fetch():
         try:
-            from borsapy import scan
+            from finans_core import scan
             univ = [s.strip().upper() for s in universe.split(",")] if "," in universe else universe.upper()
             df = scan(universe=univ, condition=condition, interval=interval, limit=limit)
             if df.empty:
