@@ -335,3 +335,99 @@ def get_market_news(request: Request, response: Response, local: bool = True, gl
     return get_cached_realtime(f"NEWS_{local}_{global_news}", fetch)
 
 
+SCAN_PRESETS = {
+    "golden-cross": {
+        "title": "Golden Cross (Altın Kesişme)",
+        "description": "50 günlük hareketli ortalamanın 200 günlük ortalamayı yukarı kırdığı yükseliş sinyali",
+        "condition": "sma_50 > sma_200",
+        "default_universe": "XU100",
+    },
+    "oversold": {
+        "title": "Aşırı Satım Bölgesi (RSI < 30)",
+        "description": "14 günlük RSI değeri 30 seviyesinin altına inmiş, dip ve tepki arayışındaki hisseler",
+        "condition": "rsi < 30",
+        "default_universe": "XU100",
+    },
+    "overbought": {
+        "title": "Aşırı Alım Bölgesi (RSI > 70)",
+        "description": "RSI değeri 70 üzerine çıkmış, güçlü ivmede seyreden veya kâr satışı riski olan hisseler",
+        "condition": "rsi > 70",
+        "default_universe": "XU100",
+    },
+    "macd-bullish": {
+        "title": "MACD Al Sinyali",
+        "description": "MACD çizgisi sinyal çizgisini yukarı yönlü kesen pozitif momentum hisseleri",
+        "condition": "macd > macd_signal",
+        "default_universe": "XU100",
+    },
+    "supertrend-bullish": {
+        "title": "Supertrend Yükseliş Trendi",
+        "description": "Supertrend göstergesi 'Al' sinyalinde olan ve trendini koruyan hisseler",
+        "condition": "supertrend_direction == 1",
+        "default_universe": "XU030",
+    },
+    "bollinger-breakout": {
+        "title": "Bollinger Üst Bant Kırılımı",
+        "description": "Kapanış fiyatı Bollinger üst bandını test eden veya yukarı zorlayan hisseler",
+        "condition": "close > bbands_upper",
+        "default_universe": "XU100",
+    },
+}
+
+
+@router.get("/market/presets")
+@limiter.limit("20/minute")
+def list_presets(request: Request, response: Response):
+    """List all available pre-configured technical scan presets."""
+    items = []
+    for key, meta in SCAN_PRESETS.items():
+        items.append({
+            "key": key,
+            "title": meta["title"],
+            "description": meta["description"],
+            "condition": meta["condition"],
+            "default_universe": meta["default_universe"],
+        })
+    return items
+
+
+@router.get("/market/presets/{preset_name}")
+@limiter.limit("10/minute")
+def run_preset(
+    request: Request,
+    response: Response,
+    preset_name: str,
+    universe: str | None = None,
+    interval: str = "1d",
+    limit: int = 50,
+):
+    """Run a pre-configured technical scan preset."""
+    preset = SCAN_PRESETS.get(preset_name.lower())
+    if not preset:
+        return {"error": f"Unknown preset '{preset_name}'. Valid presets: {list(SCAN_PRESETS.keys())}"}
+
+    target_universe = (universe or preset["default_universe"]).upper()
+    condition = preset["condition"]
+
+    def fetch():
+        try:
+            from borsapy import scan
+            univ = [s.strip().upper() for s in target_universe.split(",")] if "," in target_universe else target_universe
+            df = scan(universe=univ, condition=condition, interval=interval, limit=limit)
+            results = [] if df.empty else df_to_json(df)
+            return {
+                "preset": preset_name,
+                "title": preset["title"],
+                "description": preset["description"],
+                "condition": condition,
+                "universe": target_universe,
+                "count": len(results),
+                "data": results,
+            }
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_realtime(f"PRESET_{preset_name}_{target_universe}_{interval}_{limit}", fetch)
+
+
+
