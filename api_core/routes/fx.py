@@ -34,12 +34,8 @@ def list_fx_info(request: Request, response: Response, envelope: bool = False):
     return api_ok(data) if envelope else data
 
 
-@router.get("/gold/all")
-@limiter.limit("20/minute")
-def get_all_gold_types(request: Request, response: Response):
-    """Return all gold types (market-quoted and Darphane formula-derived) in a single matrix."""
-    def fetch():
-        try:
+def _get_all_gold_types_payload():
+    try:
             gram_fx = FX("gram-altin").current or {}
             gram_price = float(gram_fx.get("last") or 0)
 
@@ -195,10 +191,15 @@ def get_all_gold_types(request: Request, response: Response):
                 "formula_note": "Tüm ayarlar ve basılı altınlar Darphane ve Damga Matbaası Genel Müdürlüğü resmi standartları ve saflık katsayılarına göre canlı piyasa verisiyle hesaplanmaktadır.",
                 "gold_types": items
             }
-        except Exception as exc:
-            return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": str(exc)}
 
-    return get_cached_realtime("FX_GOLD_ALL", fetch)
+
+@router.get("/gold/all")
+@limiter.limit("20/minute")
+def get_all_gold_types(request: Request, response: Response):
+    """Return all gold types (market-quoted and Darphane formula-derived) in a single matrix."""
+    return get_cached_realtime("FX_GOLD_ALL", _get_all_gold_types_payload)
 
 
 def _get_asset_price_in_try(asset_name: str) -> float | None:
@@ -318,13 +319,8 @@ def convert_fx(
 def get_fx_detail(request: Request, response: Response, asset: str):
     def fetch():
         try:
-            fx = FX(asset)
-            info = fx.current
-            if info:
-                return compact_payload({k: clean_json_val(v) for k, v in info.items()})
-
-            # Check if requested asset is in derived gold types
-            gold_matrix = get_all_gold_types(request, response)
+            # Check gold matrix first for specialized and minted gold types
+            gold_matrix = get_cached_realtime("FX_GOLD_ALL", _get_all_gold_types_payload)
             if isinstance(gold_matrix, dict) and "gold_types" in gold_matrix:
                 for item in gold_matrix["gold_types"]:
                     if item["code"].lower() == asset.lower():
@@ -336,8 +332,13 @@ def get_fx_detail(request: Request, response: Response, asset: str):
                             "purity": item["purity"],
                             "pure_gold_g": item["pure_gold_g"],
                             "total_weight_g": item["total_weight_g"],
-                            "source": item["source"]
+                            "source": item["source"],
                         }
+
+            fx = FX(asset)
+            info = fx.current
+            if info and not (isinstance(info, dict) and info.get("error")):
+                return compact_payload({k: clean_json_val(v) for k, v in info.items()})
 
             return {"error": f"Asset {asset} not found or unavailable"}
         except Exception as exc:
