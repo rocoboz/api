@@ -47,6 +47,92 @@ def _market_heatmap_payload():
         return {"error": str(exc)}
 
 
+@router.get("/market/status")
+@limiter.limit("60/minute")
+def get_market_status(request: Request, response: Response):
+    """Return Borsa Istanbul (BIST) current market session status, trading hours, and schedule."""
+    from datetime import datetime, timezone, timedelta
+
+    # Turkey Time is UTC+3
+    tr_tz = timezone(timedelta(hours=3))
+    now = datetime.now(tr_tz)
+    weekday = now.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+    total_minutes = now.hour * 60 + now.minute
+
+    # Schedule definitions (in minutes from midnight)
+    t_pre_open = 9 * 60 + 40      # 09:40
+    t_open_match = 9 * 60 + 55    # 09:55
+    t_cont_start = 10 * 60        # 10:00
+    t_close_order = 18 * 60       # 18:00
+    t_close_match = 18 * 60 + 5   # 18:05
+    t_close_trades = 18 * 60 + 8  # 18:08
+    t_market_end = 18 * 60 + 10   # 18:10
+
+    if weekday in (5, 6):
+        is_open = False
+        session = "WEEKEND"
+        status_tr = "Hafta Sonu (Piyasa Kapalı)"
+        next_session = "Pazartesi 09:40 (Açılış Seansı)"
+    elif total_minutes < t_pre_open:
+        is_open = False
+        session = "PRE_MARKET"
+        status_tr = "Seans Öncesi (Kapalı)"
+        next_session = "09:40 (Açılış Seansı - Emir Toplama)"
+    elif total_minutes < t_open_match:
+        is_open = False
+        session = "OPENING_AUCTION"
+        status_tr = "Açılış Seansı (Emir Toplama)"
+        next_session = "09:55 (Eşleştirme)"
+    elif total_minutes < t_cont_start:
+        is_open = False
+        session = "OPENING_MATCH"
+        status_tr = "Açılış Seansı (Eşleştirme)"
+        next_session = "10:00 (Sürekli Müzayede Başlangıcı)"
+    elif total_minutes < t_close_order:
+        is_open = True
+        session = "CONTINUOUS_AUCTION"
+        status_tr = "Sürekli Müzayede (Seans Açık)"
+        next_session = "18:00 (Kapanış Seansı - Emir Toplama)"
+    elif total_minutes < t_close_match:
+        is_open = False
+        session = "CLOSING_AUCTION"
+        status_tr = "Kapanış Seansı (Emir Toplama)"
+        next_session = "18:05 (Kapanış Eşleştirme)"
+    elif total_minutes < t_close_trades:
+        is_open = False
+        session = "CLOSING_MATCH"
+        status_tr = "Kapanış Eşleştirme"
+        next_session = "18:08 (Kapanış Fiyatlı İşlemler)"
+    elif total_minutes < t_market_end:
+        is_open = True
+        session = "CLOSING_TRADES"
+        status_tr = "Kapanış Fiyatlı İşlemler (Seans Açık)"
+        next_session = "18:10 (Gün Sonu Kapanış)"
+    else:
+        is_open = False
+        session = "CLOSED"
+        status_tr = "Gün Sonu (Piyasa Kapalı)"
+        next_session = "Yarın 09:40 (Açılış Seansı)" if weekday < 4 else "Pazartesi 09:40 (Açılış Seansı)"
+
+    return {
+        "exchange": "Borsa İstanbul (BIST)",
+        "timezone": "Europe/Istanbul (UTC+3)",
+        "server_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "is_open": is_open,
+        "session": session,
+        "status_description": status_tr,
+        "next_event": next_session,
+        "schedule": {
+            "opening_auction": "09:40 - 09:55",
+            "opening_match": "09:55 - 10:00",
+            "continuous_trading": "10:00 - 18:00",
+            "closing_auction": "18:00 - 18:05",
+            "closing_match": "18:05 - 18:08",
+            "closing_trades": "18:08 - 18:10",
+        }
+    }
+
+
 @router.get("/market/screener")
 @limiter.limit("20/minute")
 def stock_screener(request: Request, response: Response, template: str | None = None, limit: int = 100, offset: int = 0, sort: str | None = None, direction: str = "desc", envelope: bool = False):
@@ -96,6 +182,125 @@ def get_analysis_pro(request: Request, response: Response, symbol: str):
         }
 
     return get_cached_market(f"ANALYSIS_PRO_V2_{symbol}", fetch)
+
+
+@router.get("/analysis/{symbol}/indicators")
+@limiter.limit("30/minute")
+def get_technical_indicators(request: Request, response: Response, symbol: str):
+    """Calculate and return comprehensive technical indicator values (RSI, MACD, Bollinger, EMAs, SMAs, ATR, Supertrend)."""
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            df = tk.history(period="1y")
+            if df.empty or len(df) < 30:
+                return {"symbol": symbol, "error": "Insufficient historical data for technical calculation"}
+
+            close = df["Close"]
+            high = df["High"] if "High" in df else close
+            low = df["Low"] if "Low" in df else close
+
+            current_price = float(close.iloc[-1])
+
+            # RSI 14
+            rsi_series = technical.calculate_rsi(df, period=14)
+            rsi_14 = round(float(rsi_series.iloc[-1]), 2) if not rsi_series.empty else None
+
+            # MACD (12, 26, 9)
+            macd_df = technical.calculate_macd(df, fast=12, slow=26, signal=9)
+            if not macd_df.empty:
+                macd_val = round(float(macd_df["MACD"].iloc[-1]), 3) if "MACD" in macd_df else None
+                macd_sig = round(float(macd_df["Signal"].iloc[-1]), 3) if "Signal" in macd_df else None
+                macd_hist = round(float(macd_df["Histogram"].iloc[-1]), 3) if "Histogram" in macd_df else None
+            else:
+                macd_val, macd_sig, macd_hist = None, None, None
+
+            # Bollinger Bands (20, 2)
+            bb_df = technical.calculate_bollinger_bands(df, period=20, std=2)
+            if not bb_df.empty:
+                bb_upper = round(float(bb_df["Upper"].iloc[-1]), 2) if "Upper" in bb_df else None
+                bb_middle = round(float(bb_df["Middle"].iloc[-1]), 2) if "Middle" in bb_df else None
+                bb_lower = round(float(bb_df["Lower"].iloc[-1]), 2) if "Lower" in bb_df else None
+                bandwidth = round(((bb_upper - bb_lower) / bb_middle * 100), 2) if (bb_upper and bb_lower and bb_middle) else None
+            else:
+                bb_upper, bb_middle, bb_lower, bandwidth = None, None, None, None
+
+            # Moving Averages
+            sma_20 = round(float(close.rolling(20).mean().iloc[-1]), 2) if len(close) >= 20 else None
+            sma_50 = round(float(close.rolling(50).mean().iloc[-1]), 2) if len(close) >= 50 else None
+            sma_200 = round(float(close.rolling(200).mean().iloc[-1]), 2) if len(close) >= 200 else None
+
+            ema_9 = round(float(close.ewm(span=9, adjust=False).mean().iloc[-1]), 2) if len(close) >= 9 else None
+            ema_21 = round(float(close.ewm(span=21, adjust=False).mean().iloc[-1]), 2) if len(close) >= 21 else None
+            ema_50 = round(float(close.ewm(span=50, adjust=False).mean().iloc[-1]), 2) if len(close) >= 50 else None
+
+            # Supertrend
+            st_df = technical.calculate_supertrend(df)
+            if not st_df.empty and "Supertrend" in st_df:
+                st_val = round(float(st_df["Supertrend"].iloc[-1]), 2)
+                st_trend = "BULLISH" if current_price >= st_val else "BEARISH"
+            else:
+                st_val, st_trend = None, None
+
+            # Signal interpretation
+            rsi_cond = "OVERSOLD" if rsi_14 and rsi_14 < 30 else ("OVERBOUGHT" if rsi_14 and rsi_14 > 70 else "NEUTRAL")
+            macd_cond = "BULLISH" if (macd_val and macd_sig and macd_val > macd_sig) else "BEARISH"
+
+            # Overall Score (-100 to +100)
+            score = 0
+            if rsi_14:
+                score += (30 - rsi_14) if rsi_14 < 30 else ((70 - rsi_14) if rsi_14 > 70 else 0)
+            if macd_val and macd_sig:
+                score += 25 if macd_val > macd_sig else -25
+            if sma_50 and sma_200:
+                score += 30 if sma_50 > sma_200 else -30
+            if st_trend == "BULLISH":
+                score += 20
+            elif st_trend == "BEARISH":
+                score -= 20
+
+            overall = "STRONG_BUY" if score >= 45 else ("BUY" if score >= 15 else ("STRONG_SELL" if score <= -45 else ("SELL" if score <= -15 else "NEUTRAL")))
+
+            return {
+                "symbol": symbol,
+                "current_price": current_price,
+                "indicators": {
+                    "rsi_14": rsi_14,
+                    "macd": {
+                        "macd": macd_val,
+                        "signal": macd_sig,
+                        "histogram": macd_hist
+                    },
+                    "bollinger": {
+                        "upper": bb_upper,
+                        "middle": bb_middle,
+                        "lower": bb_lower,
+                        "bandwidth_pct": bandwidth
+                    },
+                    "moving_averages": {
+                        "sma_20": sma_20,
+                        "sma_50": sma_50,
+                        "sma_200": sma_200,
+                        "ema_9": ema_9,
+                        "ema_21": ema_21,
+                        "ema_50": ema_50
+                    },
+                    "supertrend": {
+                        "value": st_val,
+                        "trend": st_trend
+                    }
+                },
+                "summary": {
+                    "rsi_condition": rsi_cond,
+                    "macd_condition": macd_cond,
+                    "trend_bias": overall
+                }
+            }
+        except Exception as exc:
+            return {"symbol": symbol, "error": str(exc)}
+
+    return get_cached_market(f"INDICATORS_{symbol}", fetch)
 
 
 @router.get("/analysis/{symbol}/insight")

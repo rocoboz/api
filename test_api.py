@@ -52,11 +52,15 @@ ENDPOINTS = [
     ("Stock ETFs", "/stocks/THYAO/etfs"),
     ("Stock Calendar", "/stocks/THYAO/calendar"),
     ("Stock Health (Piotroski)", "/stocks/THYAO/health"),
+    ("Sectors List", "/stocks/sectors"),
+    ("Sector Stocks", "/stocks/sectors/banka"),
+    ("Market Status", "/market/status"),
     ("Market Scan", "/market/scan?universe=XU030&condition=rsi+<+40"),
     ("Market Presets List", "/market/presets"),
     ("Market Preset Oversold", "/market/presets/oversold?universe=XU030"),
     ("Market News", "/market/news"),
     ("Technical Analysis", "/analysis/THYAO"),
+    ("Technical Indicators", "/analysis/THYAO/indicators"),
     ("Hybrid Insight", "/analysis/THYAO/insight"),
     ("Funds List", "/funds/list?limit=3&offset=0"),
     ("Funds List Envelope", "/funds/list?limit=3&offset=50&envelope=true"),
@@ -83,6 +87,8 @@ ENDPOINTS = [
     ("Crypto History", "/crypto/BTCTRY/history?period=5d&interval=1d"),
     ("FX List", "/fx/list"),
     ("FX Detail", "/fx/USD"),
+    ("FX Convert USD to TRY", "/fx/convert?from=USD&to=TRY&amount=100"),
+    ("FX Convert Gold to TRY", "/fx/convert?from=gram-altin&to=TRY&amount=5"),
     ("Gold All Matrix", "/fx/gold/all"),
     ("Gold 22K Bracelet", "/fx/22-ayar-bilezik"),
     ("Gold Gremse", "/fx/gremse-altin"),
@@ -111,7 +117,7 @@ ENDPOINTS = [
     ("Backtest Run", "/backtest/run"),
 ]
 
-EXPECTED_AUTH_FAILURES = {"Cache Stats", "Twitter Search"}
+EXPECTED_AUTH_FAILURES = {"Cache Stats"}
 
 
 def summarize(payload: Any) -> Any:

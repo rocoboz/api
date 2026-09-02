@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query, Request, Response
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
 from api_core.services.enrichers import enrich_stock_row, enrich_stock_rows
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
-from api_core.services.providers import Ticker, Fund, get_kap_provider, market
+from api_core.services.providers import Ticker, Fund, Index, get_kap_provider, market
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
 
@@ -47,7 +47,178 @@ def compare(request: Request, response: Response, symbols: str = Query(...), env
 
     rows = get_cached_market(f"COMPARE_{symbols}", fetch)
     meta = {"count": len(rows), "symbols": sym_list}
-    return api_ok(rows, meta) if envelope else rows
+SECTOR_DEFINITIONS = {
+    "banka": {
+        "index": "XBANK",
+        "name": "BIST Banka",
+        "description": "Bankacılık ve Finansal Hizmetler",
+        "fallback": ["AKBNK", "GARAN", "ISCTR", "YKBNK", "HALKB", "VAKBN", "ALBRK", "SKBNK", "KLNMA", "TSKB", "ICBCT", "QNBFB"],
+    },
+    "sanayi": {
+        "index": "XUSIN",
+        "name": "BIST Sınai",
+        "description": "Sanayi, Üretim ve İmalat Şirketleri",
+        "fallback": ["EREGL", "FROTO", "TOASO", "TUPRS", "ARCLK", "ASELS", "SISE", "PETKM", "KRDMD", "BRISA", "OTKAR"],
+    },
+    "holding": {
+        "index": "XHOLD",
+        "name": "BIST Holding",
+        "description": "Holding ve Yatırım Kuruluşları",
+        "fallback": ["KCHOL", "SAHOL", "SISE", "DOHOL", "TKFEN", "AGHOL", "ENKAI", "BERA", "GLYHO", "GSDHO"],
+    },
+    "teknoloji": {
+        "index": "XUTEK",
+        "name": "BIST Teknoloji",
+        "description": "Bilişim, Yazılım ve Savunma Teknolojileri",
+        "fallback": ["ASELS", "KFEIN", "VBTYZ", "MIATK", "SMART", "LOGO", "ARDYZ", "FONET", "SDTTR", "REEDR", "PATEK"],
+    },
+    "ulastirma": {
+        "index": "XULAS",
+        "name": "BIST Ulaştırma",
+        "description": "Havacılık, Lojistik, Kara ve Deniz Taşımacılığı",
+        "fallback": ["THYAO", "PGSUS", "TAVHL", "CLEBI", "RYSAS", "GSDHO"],
+    },
+    "enerji": {
+        "index": "XELKT",
+        "name": "BIST Elektrik & Enerji",
+        "description": "Yenilenebilir ve Konvansiyonel Enerji Üretimi",
+        "fallback": ["AKSEN", "ENJSA", "CWENE", "ASTOR", "EUPWR", "ALFAK", "GESAN", "SMRTG", "CANTE", "ZOREN", "AYDEM", "GWIND", "ODAS"],
+    },
+    "gida": {
+        "index": "XGIDA",
+        "name": "BIST Gıda & Perakende",
+        "description": "Gıda Üretimi, Tarım ve Zincir Marketler",
+        "fallback": ["BIMAS", "SOKM", "MGROS", "CCOLA", "AEFES", "ULKER", "TATGD", "KUTPO", "PETUN", "PNSUT"],
+    },
+    "gmyo": {
+        "index": "XGMYO",
+        "name": "BIST GYO",
+        "description": "Gayrimenkul Yatırım Ortaklıkları",
+        "fallback": ["EKGYO", "TRGYO", "ISGYO", "SNGYO", "KZGYO", "AVPGY", "OZKGY", "VKGYO", "KLGYO", "DAPGM", "PEKGY"],
+    },
+    "kimya": {
+        "index": "XKMYA",
+        "name": "BIST Kimya, Petrol & Plastik",
+        "description": "Petrokimya, Gübre, Boya ve Plastik",
+        "fallback": ["TUPRS", "PETKM", "SASA", "HEKTS", "KORDS", "BAGFS", "GUBRF", "EGGUB", "DYOBY"],
+    },
+    "iletisim": {
+        "index": "XILTM",
+        "name": "BIST İletişim",
+        "description": "Telekomünikasyon ve Haberleşme",
+        "fallback": ["TCELL", "TTKOM"],
+    },
+    "maden": {
+        "index": "XMADN",
+        "name": "BIST Madencilik",
+        "description": "Maden Çıkarma ve Doğal Kaynaklar",
+        "fallback": ["KOZAL", "KOZAA", "IPEKE", "PRKME"],
+    },
+    "metal": {
+        "index": "XMANA",
+        "name": "BIST Metal Ana",
+        "description": "Demir, Çelik ve Metalurji Sanayi",
+        "fallback": ["EREGL", "KRDMD", "KRDMA", "KRDMB", "ISDMR", "CEMTS", "BRSAN", "BMSCH", "TUCLK"],
+    },
+    "sigorta": {
+        "index": "XSGRT",
+        "name": "BIST Sigorta",
+        "description": "Sigorta ve Bireysel Emeklilik",
+        "fallback": ["ANSGR", "AKGRT", "TURSG", "AGESA", "RAYSG"],
+    },
+    "turizm": {
+        "index": "XTRZM",
+        "name": "BIST Turizm",
+        "description": "Turizm, Otelcilik ve Eğlence",
+        "fallback": ["AYCES", "MAALT", "PKENT", "TEKTU", "ULAS"],
+    },
+    "tekstil": {
+        "index": "XTEKS",
+        "name": "BIST Tekstil",
+        "description": "Tekstil, Giyim ve Deri Üretimi",
+        "fallback": ["MNDRS", "BOSSA", "KORDS", "YUNSA", "ARSAN", "DESA"],
+    },
+    "spor": {
+        "index": "XSPOR",
+        "name": "BIST Spor",
+        "description": "Spor Kulüpleri ve Sportif Faaliyetler",
+        "fallback": ["BJKAS", "FENER", "GSRAY", "TSPOR"],
+    },
+    "katilim": {
+        "index": "XKTUM",
+        "name": "BIST Katılım Tüm",
+        "description": "Faizsiz Finans / Katılım Esaslarına Uygun Hisseler",
+        "fallback": ["BIMAS", "THYAO", "ASELS", "EREGL", "FROTO", "TUPRS", "ENJSA", "ASTOR", "KCHOL"],
+    },
+}
+
+
+@router.get("/sectors")
+@limiter.limit("30/minute")
+def list_sectors(request: Request, response: Response):
+    """Return all available Borsa Istanbul (BIST) sector classifications with index codes and descriptions."""
+    sectors_list = [
+        {
+            "slug": slug,
+            "index_code": data["index"],
+            "name": data["name"],
+            "description": data["description"],
+            "url": f"/stocks/sectors/{slug}",
+        }
+        for slug, data in SECTOR_DEFINITIONS.items()
+    ]
+    return {
+        "count": len(sectors_list),
+        "sectors": sectors_list,
+    }
+
+
+@router.get("/sectors/{sector}")
+@limiter.limit("30/minute")
+def get_sector_stocks(request: Request, response: Response, sector: str, envelope: bool = False):
+    """Return all constituent stocks for a specific sector with live quotes."""
+    sec_key = sector.lower().strip()
+    matched_entry = None
+    if sec_key in SECTOR_DEFINITIONS:
+        matched_entry = SECTOR_DEFINITIONS[sec_key]
+    else:
+        for k, v in SECTOR_DEFINITIONS.items():
+            if v["index"].lower() == sec_key or k == sec_key:
+                matched_entry = v
+                break
+
+    if not matched_entry:
+        return {
+            "error": f"Sector '{sector}' not found. Available sectors: {list(SECTOR_DEFINITIONS.keys())}"
+        }
+
+    index_code = matched_entry["index"]
+
+    def fetch():
+        companies = []
+        try:
+            idx = Index(index_code)
+            comps = idx.components
+            if comps:
+                companies = [c["symbol"] for c in comps]
+        except Exception:
+            pass
+
+        if not companies:
+            companies = matched_entry["fallback"]
+
+        enriched = [enrich_stock_row({"symbol": s, "name": s}) for s in companies]
+        return {
+            "sector": sec_key,
+            "index_code": index_code,
+            "name": matched_entry["name"],
+            "description": matched_entry["description"],
+            "company_count": len(enriched),
+            "companies": enriched,
+        }
+
+    data = get_cached_static(f"SECTOR_COMPONENTS_{index_code}", fetch)
+    return api_ok(data) if envelope else data
 
 
 @router.get("/{symbol}")
