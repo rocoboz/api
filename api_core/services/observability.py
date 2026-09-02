@@ -7,7 +7,7 @@ from typing import Callable
 
 from fastapi import Request, Response
 
-logger = logging.getLogger("borsapy.api")
+logger = logging.getLogger("finansapi.api")
 
 
 async def request_timing_middleware(request: Request, call_next: Callable):

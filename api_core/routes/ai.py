@@ -16,7 +16,7 @@ from api_core.services.normalizers import clean_json_val, compact_payload, df_to
 from api_core.services.providers import Fund, Index, Ticker, get_kap_provider, market, technical
 from api_core.services.response import api_ok
 
-logger = logging.getLogger("borsapy.ai")
+logger = logging.getLogger("finansapi.ai")
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 

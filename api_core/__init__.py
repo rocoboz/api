@@ -1,1 +1,1 @@
-"""BorsaPy API application package."""
+"""FinansAPI application package."""

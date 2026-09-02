@@ -1,14 +1,14 @@
-# BorsaPy Ultimate API
+# FinansAPI
 
-FastAPI tabanlı, BIST ve TEFAS odaklı, frontend dostu finans verisi katmanı. Bu sürümde API modüler yapıya taşındı, cache sistemi Redis-ready hale getirildi, route çakışmaları giderildi, null/0 semantiği netleştirildi ve Render deploy akışı production kullanıma uygunlaştırıldı.
+FastAPI tabanlı, BIST ve TEFAS odaklı, frontend dostu kurumsal finans verisi katmanı. API modüler yapıya taşındı, cache sistemi Redis-ready hale getirildi, route çakışmaları giderildi, null/0 semantiği netleştirildi ve Render deploy akışı production kullanıma uygunlaştırıldı.
 
 ## Mimari
 
 - `main.py`: ince entrypoint
 - `api_core/app.py`: FastAPI bootstrap, middleware, router registration
-- `api_core/routes/*`: stocks, funds, market, economy, search, ops
+- `api_core/routes/*`: stocks, funds, market, economy, search, ops, fx, crypto, bonds, portfolio, backtest
 - `api_core/services/*`: cache, security, providers, response, normalizers, analytics, observability
-- `borsapy_lib/`: upstream kütüphane kopyası
+- `borsapy_lib/`: finans veri motoru kütüphanesi
 
 ## Temel Prensipler
 
@@ -252,4 +252,4 @@ gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 2 --threads 4 --tim
 
 - Redis yoksa API çalışır, ama çoklu instance senaryosunda shared cache avantajı kaybolur.
 - 1000 kullanıcı kapasitesi yalnız app koduna bağlı değildir; Render planı, upstream rate limit ve Redis kullanımı belirleyicidir.
-- `borsapy_lib` upstream kaynaktan beslendiği için bazı veri boşlukları uygulama yerine kaynağa bağlı olabilir.
+- Kamuya açık veri sağlayıcılarından beslenildiği için bazı anlık veri boşlukları uygulama yerine veri kaynağına bağlı olabilir.

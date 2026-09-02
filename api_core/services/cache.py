@@ -34,7 +34,7 @@ class CacheNamespace:
         self._lock = threading.RLock()
 
     def _redis_key(self, key: str) -> str:
-        return f"borsapy:{self.name}:{key}"
+        return f"finansapi:{self.name}:{key}"
 
     def _get_redis(self, key: str) -> Any | None:
         if not self._redis:
