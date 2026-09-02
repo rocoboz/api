@@ -78,6 +78,8 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /stocks/{symbol}/disclosures` — Son KAP bildirimleri.
 * `GET /stocks/{symbol}/calendar` — Bilanço açıklama takvimi.
 * `GET /stocks/compare?symbols=THYAO,ASELS` — Çoklu hisse karşılaştırması.
+* `GET /stocks/sectors` — **BIST sektör listesi ve endeks kodları** (Banka, Sanayi, Holding, Teknoloji vb.).
+* `GET /stocks/sectors/{sector}` — **Sektöre ait hisseler ve anlık fiyatları** (Örn: `/stocks/sectors/banka`).
 
 ### 3. TEFAS Yatırım Fonları (`/funds`)
 * `GET /funds/list` — Tüm TEFAS fonlarının listesi.
@@ -90,6 +92,7 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /funds/screener` — Fon tipi ve getiri kriterlerine göre fon tarayıcı.
 
 ### 4. Piyasa, Taramalar & Hazır Stratejiler (`/market`)
+* `GET /market/status` — **BIST canlı seans durumu** (Açık/Kapalı, seans aşaması ve çalışma saatleri).
 * `GET /market/presets` — Hazır teknik tarama stratejileri listesi.
 * `GET /market/presets/{preset_name}` — Hazır stratejiyi çalıştırır (`golden-cross`, `oversold`, `macd-bullish`, vb.).
 * `GET /market/scan?universe=XU030&condition=rsi < 40` — Özel matematiksel tarama motoru.
@@ -99,9 +102,11 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /market/summary` — Endeksler, en çok artanlar/azalanlar ve piyasa özeti.
 * `GET /market/news` — Güncel BIST ve ekonomi haber akışı.
 * `GET /analysis/{symbol}` — Otomatik teknik sinyal özeti.
+* `GET /analysis/{symbol}/indicators` — **Detaylı matematiksel teknik göstergeler** (RSI, MACD, Bollinger, EMA/SMA, Supertrend).
 
 ### 5. Döviz & Altın Matrisi (`/fx`)
 * `GET /fx/list` — Desteklenen para birimleri ve kurumlar.
+* `GET /fx/convert?from=USD&to=TRY&amount=100` — **Canlı döviz, altın ve TL çevirici / hesap makinesi** (Örn: USD, EUR, gram-altin, ceyrek-altin).
 * `GET /fx/gold/all` — **Tüm altın türleri matrisi** (Gram, 22 Ayar Bilezik, 18/14 Ayar, Çeyrek, Yarım, Tam, Ata, Gremse, Reşat, Ons).
 * `GET /fx/{asset}` — Döviz veya altın anlık kuru (Örn: `USD`, `gram-altin`, `22-ayar-bilezik`).
 * `GET /fx/{asset}/history` — Tarihsel döviz/altın grafiği.

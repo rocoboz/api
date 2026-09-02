@@ -201,6 +201,104 @@ def get_all_gold_types(request: Request, response: Response):
     return get_cached_realtime("FX_GOLD_ALL", fetch)
 
 
+def _get_asset_price_in_try(asset_name: str) -> float | None:
+    sym = asset_name.strip()
+    sym_upper = sym.upper()
+    if sym_upper in ("TRY", "TL"):
+        return 1.0
+
+    gold_alias_map = {
+        "ALTIN": "gram-altin",
+        "GRAM": "gram-altin",
+        "GRAM-ALTIN": "gram-altin",
+        "CEYREK": "ceyrek-altin",
+        "CEYREK-ALTIN": "ceyrek-altin",
+        "YARIM": "yarim-altin",
+        "YARIM-ALTIN": "yarim-altin",
+        "TAM": "tam-altin",
+        "TAM-ALTIN": "tam-altin",
+        "CUMHURIYET": "cumhuriyet-altin",
+        "ATA": "ata-altin",
+        "BILEZIK": "22-ayar-bilezik",
+        "22-AYAR": "22-ayar-bilezik",
+        "ONS": "ons-altin",
+    }
+    resolved = gold_alias_map.get(sym_upper, sym)
+
+    try:
+        data = FX(resolved).current
+        if data and data.get("last"):
+            val = float(data.get("last"))
+            if val > 0:
+                return val
+    except Exception:
+        pass
+
+    try:
+        gram_price = float(FX("gram-altin").current.get("last") or 0)
+        if gram_price > 0:
+            formulas = {
+                "22-ayar-bilezik": gram_price * 0.9166,
+                "18-ayar-altin": gram_price * 0.75,
+                "14-ayar-altin": gram_price * 0.585,
+                "ceyrek-altin": gram_price * 1.6065 * 1.04,
+                "yarim-altin": gram_price * 3.213 * 1.04,
+                "tam-altin": gram_price * 6.426 * 1.04,
+                "cumhuriyet-altin": gram_price * 6.60 * 1.05,
+                "ata-altin": gram_price * 6.60 * 1.05,
+                "gremse-altin": gram_price * 16.065 * 1.04,
+                "resat-altin": gram_price * 6.60 * 1.06,
+            }
+            if resolved.lower() in formulas:
+                return formulas[resolved.lower()]
+    except Exception:
+        pass
+
+    return None
+
+
+@router.get("/convert")
+@limiter.limit("60/minute")
+def convert_fx(
+    request: Request,
+    response: Response,
+    from_asset: str = Query(..., alias="from", description="Source currency or gold code (e.g. USD, EUR, gram-altin, ceyrek-altin, TRY)"),
+    to_asset: str = Query("TRY", alias="to", description="Target currency or gold code (e.g. TRY, USD, EUR, gram-altin)"),
+    amount: float = Query(1.0, gt=0, description="Amount to convert"),
+):
+    """Convert amounts between live currencies, precious metals (gold/silver), and Turkish Lira."""
+    from_asset = from_asset.strip()
+    to_asset = to_asset.strip()
+
+    def fetch():
+        rate_from = _get_asset_price_in_try(from_asset)
+        rate_to = _get_asset_price_in_try(to_asset)
+
+        if rate_from is None:
+            return {"error": f"Unsupported or unavailable source asset: '{from_asset}'"}
+        if rate_to is None:
+            return {"error": f"Unsupported or unavailable target asset: '{to_asset}'"}
+        if rate_to <= 0:
+            return {"error": f"Invalid conversion rate for target asset: '{to_asset}'"}
+
+        total_in_try = amount * rate_from
+        converted_amount = total_in_try / rate_to
+        unit_rate = rate_from / rate_to
+
+        return {
+            "from": from_asset.upper(),
+            "to": to_asset.upper(),
+            "amount": amount,
+            "rate": round(unit_rate, 6),
+            "result": round(converted_amount, 4),
+            "value_in_try": round(total_in_try, 2),
+            "from_rate_try": round(rate_from, 4),
+            "to_rate_try": round(rate_to, 4),
+        }
+
+    return get_cached_realtime(f"FX_CONV_{from_asset}_{to_asset}_{amount}", fetch)
+
+
 @router.get("/{asset}")
 @limiter.limit("30/minute")
 def get_fx_detail(request: Request, response: Response, asset: str):
