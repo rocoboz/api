@@ -279,3 +279,196 @@ def get_stock_calendar(request: Request, response: Response, symbol: str):
 
     return get_cached_static(f"CAL_{symbol}", fetch)
 
+
+def _find_item_val(df: pd.DataFrame | None, keywords: list[str], col_idx: int = 0) -> float | None:
+    if df is None or df.empty or col_idx >= len(df.columns):
+        return None
+    for idx_label in df.index:
+        label_str = str(idx_label).lower()
+        if any(k in label_str for k in keywords):
+            try:
+                val = float(df.iloc[df.index.get_loc(idx_label), col_idx])
+                if not pd.isna(val):
+                    return val
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+@router.get("/{symbol}/health")
+@limiter.limit("20/minute")
+def get_stock_health(request: Request, response: Response, symbol: str):
+    symbol = symbol.upper()
+
+    def fetch():
+        try:
+            tk = Ticker(symbol)
+            info = tk.info or {}
+
+            try:
+                bs = tk.balance_sheet
+            except Exception:
+                bs = None
+            try:
+                inc = tk.income_stmt
+            except Exception:
+                inc = None
+            try:
+                cf = tk.cashflow
+            except Exception:
+                cf = None
+
+            signals = []
+            score = 0
+            max_points = 0
+
+            # 1. Net Income > 0
+            net_inc_cur = _find_item_val(inc, ["dönem karı", "net kar", "net profit"], 0)
+            if net_inc_cur is not None:
+                max_points += 1
+                passed = net_inc_cur > 0
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "net_income_positive",
+                    "category": "Karlılık",
+                    "title": "Pozitif Net Kâr",
+                    "passed": bool(passed),
+                    "detail": f"Son dönem net kârı pozitif ({round(net_inc_cur, 2)})" if passed else "Son dönemde net zarar açıklandı."
+                })
+
+            # 2. Operating Cash Flow > 0
+            cfo_cur = _find_item_val(cf, ["işletme faaliyet", "faaliyet nakit", "operating cash"], 0)
+            if cfo_cur is not None:
+                max_points += 1
+                passed = cfo_cur > 0
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "cfo_positive",
+                    "category": "Karlılık",
+                    "title": "Faaliyet Nakit Akışı Pozitif",
+                    "passed": bool(passed),
+                    "detail": f"İşletme faaliyetlerinden nakit girişi sağlandı ({round(cfo_cur, 2)})" if passed else "Faaliyetlerden nakit çıkışı var."
+                })
+
+            # 3. Quality of earnings (CFO > Net Income)
+            if net_inc_cur is not None and cfo_cur is not None:
+                max_points += 1
+                passed = cfo_cur > net_inc_cur
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "accrual_quality",
+                    "category": "Nakit Kalitesi",
+                    "title": "Nakit Kalitesi (CFO > Net Kâr)",
+                    "passed": bool(passed),
+                    "detail": "Kârın nakit karşılığı yüksek ve kaliteli" if passed else "Net kâr nakit akışından yüksek (muhasebesel tahakkuk payı var)"
+                })
+
+            # 4. Total Assets & ROA Trend
+            assets_cur = _find_item_val(bs, ["toplam varlık", "toplam aktif"], 0)
+            assets_prev = _find_item_val(bs, ["toplam varlık", "toplam aktif"], 1)
+            net_inc_prev = _find_item_val(inc, ["dönem karı", "net kar", "net profit"], 1)
+            if assets_cur and assets_prev and net_inc_cur is not None and net_inc_prev is not None:
+                max_points += 1
+                roa_cur = net_inc_cur / assets_cur if assets_cur else 0
+                roa_prev = net_inc_prev / assets_prev if assets_prev else 0
+                passed = roa_cur > roa_prev
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "roa_growth",
+                    "category": "Verimlilik",
+                    "title": "Aktif Karlılığı (ROA) Artışı",
+                    "passed": bool(passed),
+                    "detail": f"Aktif kârlılığı önceki döneme göre arttı (%{round(roa_cur*100, 2)} > %{round(roa_prev*100, 2)})" if passed else "Aktif kârlılığı geriledi."
+                })
+
+            # 5. Leverage (Long term debt)
+            debt_cur = _find_item_val(bs, ["uzun vadeli yükümlülük", "uzun vadeli borç"], 0)
+            debt_prev = _find_item_val(bs, ["uzun vadeli yükümlülük", "uzun vadeli borç"], 1)
+            if debt_cur is not None and debt_prev is not None:
+                max_points += 1
+                passed = debt_cur <= debt_prev
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "lower_leverage",
+                    "category": "Kaldıraç & Borç",
+                    "title": "Uzun Vadeli Borç Eğilimi",
+                    "passed": bool(passed),
+                    "detail": "Uzun vadeli borç azaldı veya sabit kaldı" if passed else "Uzun vadeli borçlanma arttı"
+                })
+
+            # 6. Current Ratio (Likidite)
+            ca_cur = _find_item_val(bs, ["dönen varlık"], 0)
+            cl_cur = _find_item_val(bs, ["kısa vadeli yükümlülük"], 0)
+            ca_prev = _find_item_val(bs, ["dönen varlık"], 1)
+            cl_prev = _find_item_val(bs, ["kısa vadeli yükümlülük"], 1)
+            if ca_cur and cl_cur and ca_prev and cl_prev:
+                max_points += 1
+                cr_cur = ca_cur / cl_cur if cl_cur else 0
+                cr_prev = ca_prev / cl_prev if cl_prev else 0
+                passed = cr_cur > cr_prev
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "higher_liquidity",
+                    "category": "Likidite",
+                    "title": "Cari Oran (Likidite) Artışı",
+                    "passed": bool(passed),
+                    "detail": f"Cari oran güçlendi ({round(cr_cur, 2)} > {round(cr_prev, 2)})" if passed else f"Cari oran geriledi ({round(cr_cur, 2)})"
+                })
+
+            # 7. Gross Margin trend
+            rev_cur = _find_item_val(inc, ["satış gelir", "hasılat"], 0)
+            gp_cur = _find_item_val(inc, ["brüt kar"], 0)
+            rev_prev = _find_item_val(inc, ["satış gelir", "hasılat"], 1)
+            gp_prev = _find_item_val(inc, ["brüt kar"], 1)
+            if rev_cur and gp_cur and rev_prev and gp_prev:
+                max_points += 1
+                gm_cur = gp_cur / rev_cur if rev_cur else 0
+                gm_prev = gp_prev / rev_prev if rev_prev else 0
+                passed = gm_cur > gm_prev
+                if passed:
+                    score += 1
+                signals.append({
+                    "id": "higher_margin",
+                    "category": "Operasyonel Verimlilik",
+                    "title": "Brüt Kâr Marjı Artışı",
+                    "passed": bool(passed),
+                    "detail": f"Brüt marj iyileşti (%{round(gm_cur*100, 2)} > %{round(gm_prev*100, 2)})" if passed else f"Brüt marj daraldı (%{round(gm_cur*100, 2)})"
+                })
+
+            # Determine Rating
+            ratio = (score / max_points) if max_points > 0 else 0
+            if ratio >= 0.75:
+                rating = "STRONG"
+                rating_tr = "Güçlü Finansal Yapı"
+            elif ratio >= 0.5:
+                rating = "MODERATE"
+                rating_tr = "Dengeli Finansal Yapı"
+            else:
+                rating = "WEAK"
+                rating_tr = "Zayıf / Dikkat Edilmeli"
+
+            return compact_payload({
+                "symbol": symbol,
+                "score": score,
+                "max_score": max_points or 9,
+                "rating": rating,
+                "rating_tr": rating_tr,
+                "valuation_multiples": {
+                    "pe": clean_json_val(info.get("pe")),
+                    "pddd": clean_json_val(info.get("pddd")),
+                    "market_cap": clean_json_val(info.get("market_cap")),
+                    "beta": clean_json_val(info.get("beta")),
+                },
+                "signals": signals
+            })
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return get_cached_static(f"HEALTH_{symbol}", fetch)
+

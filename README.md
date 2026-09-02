@@ -70,6 +70,11 @@ python test_api.py
 - `/stocks/{symbol}/disclosures`
 - `/stocks/{symbol}/dividends`
 - `/stocks/{symbol}/financials`
+- `/stocks/{symbol}/health`
+- `/stocks/{symbol}/recommendations`
+- `/stocks/{symbol}/holders`
+- `/stocks/{symbol}/etfs`
+- `/stocks/{symbol}/calendar`
 
 ### Funds
 
@@ -87,6 +92,10 @@ python test_api.py
 - `/market/breadth`
 - `/market/heatmap`
 - `/market/summary`
+- `/market/scan`
+- `/market/presets`
+- `/market/presets/{preset_name}`
+- `/market/news`
 - `/home/highlights`
 - `/analysis/{symbol}`
 - `/analysis/{symbol}/sentiment`
