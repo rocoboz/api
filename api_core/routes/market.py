@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.analytics import analyze_sentiment
@@ -146,57 +147,70 @@ def get_market_overview(request: Request, response: Response):
         is_open = (weekday < 5) and ((10 * 60 <= total_minutes < 18 * 60) or (18 * 60 + 8 <= total_minutes < 18 * 60 + 10))
         session_name = "WEEKEND" if weekday in (5, 6) else ("CONTINUOUS_AUCTION" if (10 * 60 <= total_minutes < 18 * 60) else "CLOSED")
 
-        indices_data = {}
-        for idx_sym in ["XU100", "XU030", "XBANK", "XUSIN"]:
+        def fetch_index(sym):
             try:
-                info = Index(idx_sym).info or {}
-                indices_data[idx_sym] = {
-                    "name": info.get("name", idx_sym),
+                info = Index(sym).info or {}
+                return sym, {
+                    "name": info.get("name", sym),
                     "last": info.get("last"),
                     "change": info.get("change"),
                     "change_percent": info.get("change_percent")
                 }
             except Exception:
-                indices_data[idx_sym] = None
+                return sym, None
 
-        fx_data = {}
-        for fx_sym in ["USD", "EUR", "GBP"]:
+        def fetch_fx(sym):
             try:
-                cur = FX(fx_sym).current or {}
-                fx_data[fx_sym] = {
+                cur = FX(sym).current or {}
+                return sym, {
                     "rate": cur.get("last"),
                     "change_percent": cur.get("change_percent") or cur.get("change")
                 }
             except Exception:
-                fx_data[fx_sym] = None
+                return sym, None
 
-        gold_data = {}
-        try:
-            gram = FX("gram-altin").current or {}
-            gram_price = float(gram.get("last") or 0)
-            gold_data["gram_altin"] = round(gram_price, 2)
-            gold_data["ceyrek_altin"] = round(gram_price * 1.6065 * 1.04, 2) if gram_price > 0 else None
-            gold_data["ons_altin_usd"] = float(FX("ons-altin-usd").current.get("last") or 0)
-        except Exception:
-            pass
+        def fetch_gold():
+            gold = {}
+            try:
+                gram = FX("gram-altin").current or {}
+                gram_price = float(gram.get("last") or 0)
+                gold["gram_altin"] = round(gram_price, 2)
+                gold["ceyrek_altin"] = round(gram_price * 1.6065 * 1.04, 2) if gram_price > 0 else None
+                gold["ons_altin_usd"] = float(FX("ons-altin-usd").current.get("last") or 0)
+            except Exception:
+                pass
+            return gold
 
-        movers = {"gainers": [], "losers": []}
-        try:
-            from tradingview_screener import Query as TvQuery
-            _, df = TvQuery().set_markets("turkey").select("name", "close", "change", "volume").get_scanner_data()
-            if not df.empty:
-                df = df.dropna(subset=["change", "close"])
-                sorted_df = df.sort_values("change", ascending=False)
-                movers["gainers"] = [
-                    {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
-                    for _, r in sorted_df.head(3).iterrows()
-                ]
-                movers["losers"] = [
-                    {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
-                    for _, r in sorted_df.tail(3).iloc[::-1].iterrows()
-                ]
-        except Exception:
-            pass
+        def fetch_movers():
+            mov = {"gainers": [], "losers": []}
+            try:
+                from tradingview_screener import Query as TvQuery
+                _, df = TvQuery().set_markets("turkey").select("name", "close", "change", "volume").get_scanner_data()
+                if not df.empty:
+                    df = df.dropna(subset=["change", "close"])
+                    sorted_df = df.sort_values("change", ascending=False)
+                    mov["gainers"] = [
+                        {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
+                        for _, r in sorted_df.head(3).iterrows()
+                    ]
+                    mov["losers"] = [
+                        {"symbol": r["name"], "price": float(r["close"]), "change_percent": round(float(r["change"]), 2)}
+                        for _, r in sorted_df.tail(3).iloc[::-1].iterrows()
+                    ]
+            except Exception:
+                pass
+            return mov
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            idx_futures = [executor.submit(fetch_index, sym) for sym in ["XU100", "XU030", "XBANK", "XUSIN"]]
+            fx_futures = [executor.submit(fetch_fx, sym) for sym in ["USD", "EUR", "GBP"]]
+            gold_future = executor.submit(fetch_gold)
+            movers_future = executor.submit(fetch_movers)
+
+            indices_data = dict(f.result() for f in idx_futures)
+            fx_data = dict(f.result() for f in fx_futures)
+            gold_data = gold_future.result()
+            movers = movers_future.result()
 
         return {
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
