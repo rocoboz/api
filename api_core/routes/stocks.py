@@ -7,8 +7,7 @@ import pandas as pd
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
-from api_core.services.enrichers import enrich_stock_row, enrich_stock_rows
-from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
+from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json, normalize_stock_row
 from api_core.services.providers import Ticker, Fund, Index, get_kap_provider, market
 from api_core.services.response import api_ok, pagination_meta
 from api_core.services.security import limiter
@@ -21,6 +20,31 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 def list_stocks(request: Request, response: Response, limit: int = 50, offset: int = 0, envelope: bool = False):
     def fetch():
         try:
+            from tradingview_screener import Query as TvQuery
+            fetch_limit = max(offset + limit, 600)
+            q = (
+                TvQuery()
+                .set_markets("turkey")
+                .select(
+                    "name", "close", "change", "volume", "price_book_ratio", "market_cap_basic", "price_earnings_ttm"
+                )
+                .limit(fetch_limit)
+            )
+            _, df = q.get_scanner_data()
+            if not df.empty:
+                df = df.rename(columns={
+                    "name": "symbol",
+                    "close": "price",
+                    "price_book_ratio": "pddd",
+                    "price_earnings_ttm": "pe",
+                    "market_cap_basic": "market_cap"
+                })
+                sliced = df.iloc[offset : offset + limit]
+                return [normalize_stock_row(row) for row in df_to_json(sliced)]
+        except Exception:
+            pass
+
+        try:
             df = market.companies()
             if df.empty:
                 return []
@@ -29,7 +53,7 @@ def list_stocks(request: Request, response: Response, limit: int = 50, offset: i
         except Exception:
             return []
 
-    rows = get_cached_static(f"ST_LIST_V2_{limit}_{offset}", fetch)
+    rows = get_cached_static(f"ST_LIST_V3_{limit}_{offset}", fetch)
     meta = pagination_meta(limit=limit, offset=offset, count=len(rows))
     response.headers["X-Limit"] = str(limit)
     response.headers["X-Offset"] = str(offset)
