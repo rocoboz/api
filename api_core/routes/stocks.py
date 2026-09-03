@@ -7,6 +7,7 @@ import pandas as pd
 from fastapi import APIRouter, Query, Request, Response
 
 from api_core.services.cache import get_cached_market, get_cached_realtime, get_cached_static
+from api_core.services.enrichers import enrich_stock_row, enrich_stock_rows
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json, normalize_stock_row
 from api_core.services.providers import Ticker, Fund, Index, get_kap_provider, market
 from api_core.services.response import api_ok, pagination_meta
