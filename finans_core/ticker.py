@@ -3,6 +3,8 @@
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from functools import cached_property
+import threading
+import time
 from typing import Any
 
 import pandas as pd
@@ -118,6 +120,9 @@ class FastInfo:
         "foreign_ratio",
     ]
 
+    _STATS_1Y_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+    _STATS_1Y_LOCK = threading.Lock()
+
     def __init__(self, ticker: "Ticker"):
         self._ticker = ticker
         self._data: dict[str, Any] | None = None
@@ -138,23 +143,49 @@ class FastInfo:
         except Exception:
             metrics = {}
 
-        # Calculate 52-week high/low and moving averages from history
+        # Calculate 52-week high/low and moving averages from history (cached for 1 hour)
         year_high = None
         year_low = None
         fifty_day_avg = None
         two_hundred_day_avg = None
 
-        try:
-            hist = self._ticker.history(period="1y")
-            if not hist.empty:
-                year_high = float(hist["High"].max())
-                year_low = float(hist["Low"].min())
-                if len(hist) >= 50:
-                    fifty_day_avg = float(hist["Close"].tail(50).mean())
-                if len(hist) >= 200:
-                    two_hundred_day_avg = float(hist["Close"].tail(200).mean())
-        except Exception:
-            pass
+        sym = getattr(self._ticker, "_symbol", "").upper()
+        now = time.time()
+        cached_stats = None
+
+        with self._STATS_1Y_LOCK:
+            if sym in self._STATS_1Y_CACHE:
+                cached_time, stats_dict = self._STATS_1Y_CACHE[sym]
+                if now - cached_time < 3600:
+                    cached_stats = stats_dict
+
+        if cached_stats is not None:
+            year_high = cached_stats.get("year_high")
+            year_low = cached_stats.get("year_low")
+            fifty_day_avg = cached_stats.get("fifty_day_avg")
+            two_hundred_day_avg = cached_stats.get("two_hundred_day_avg")
+        else:
+            try:
+                hist = self._ticker.history(period="1y")
+                if not hist.empty:
+                    year_high = float(hist["High"].max())
+                    year_low = float(hist["Low"].min())
+                    if len(hist) >= 50:
+                        fifty_day_avg = float(hist["Close"].tail(50).mean())
+                    if len(hist) >= 200:
+                        two_hundred_day_avg = float(hist["Close"].tail(200).mean())
+                    with self._STATS_1Y_LOCK:
+                        self._STATS_1Y_CACHE[sym] = (
+                            now,
+                            {
+                                "year_high": year_high,
+                                "year_low": year_low,
+                                "fifty_day_avg": fifty_day_avg,
+                                "two_hundred_day_avg": two_hundred_day_avg,
+                            },
+                        )
+            except Exception:
+                pass
 
         # Calculate shares from market cap and price
         shares = None

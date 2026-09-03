@@ -28,6 +28,7 @@ from api_core.routes.ai import router as ai_router
 from api_core.routes.calculator import router as calculator_router
 from api_core.services.observability import request_timing_middleware
 from api_core.services.security import limiter
+from api_core.services.warmer import start_cache_warmer
 
 
 def create_app() -> FastAPI:
@@ -67,14 +68,15 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
+        start_cache_warmer()
+
         async def ping_regularly():
-            if not settings.render_external_url:
-                return
+            target_url = settings.render_external_url or "https://api-2vxc.onrender.com"
             while True:
-                await asyncio.sleep(14 * 60)
+                await asyncio.sleep(10 * 60)
                 try:
                     async with httpx.AsyncClient(timeout=5.0) as client:
-                        await client.get(f"{settings.render_external_url}/ping")
+                        await client.get(f"{target_url}/ping")
                 except Exception:
                     pass
 
