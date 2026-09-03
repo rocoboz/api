@@ -85,6 +85,17 @@ async def _warm_funds():
         logger.debug("[Warmer] TEFAS funds warming error: %s", exc)
 
 
+async def _warm_stock_list():
+    try:
+        from api_core.routes.stocks import list_stocks
+        class DummyObj:
+            headers = {}
+        await asyncio.to_thread(list_stocks, DummyObj(), DummyObj(), 50, 0, False)
+        logger.info("[Warmer] Stock list (50) warmed successfully.")
+    except Exception as exc:
+        logger.debug("[Warmer] Stock list warming error: %s", exc)
+
+
 async def run_cache_warmer():
     """
     Continuous background task that proactively populates and refreshes
@@ -97,6 +108,7 @@ async def run_cache_warmer():
 
     # Initial warm-up on server boot
     await _warm_market_overview()
+    await _warm_stock_list()
 
     loop_count = 0
     while True:
