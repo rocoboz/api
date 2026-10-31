@@ -1,5 +1,6 @@
 """Base provider class for all data providers."""
 
+import os
 from typing import Any
 
 import httpx
@@ -18,7 +19,7 @@ class BaseProvider:
 
     def __init__(
         self,
-        timeout: float = 30.0,
+        timeout: float | None = None,
         cache: Cache | None = None,
         verify: bool = True,
     ):
@@ -30,6 +31,8 @@ class BaseProvider:
             cache: Cache instance to use. If None, uses global cache.
             verify: Whether to verify SSL certificates.
         """
+        if timeout is None:
+            timeout = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "15"))
         self._client = httpx.Client(
             timeout=timeout, headers=self.DEFAULT_HEADERS, verify=verify
         )

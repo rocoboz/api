@@ -152,7 +152,7 @@ class TEFASProvider(BaseProvider):
     _PERIYOD_MAX = 60
 
     def __init__(self):
-        super().__init__(verify=False)
+        super().__init__()
 
     @staticmethod
     def _parse_turkish_decimal(value: str | None) -> float | None:

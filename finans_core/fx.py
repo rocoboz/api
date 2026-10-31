@@ -8,6 +8,7 @@ import pandas as pd
 from finans_core._providers.canlidoviz import get_canlidoviz_provider
 from finans_core._providers.dovizcom import get_dovizcom_provider
 from finans_core._providers.tradingview import get_tradingview_provider
+from finans_core.assets import get_asset_spec, resolve_asset_code
 from finans_core.technical import TechnicalMixin
 from finans_core.twitter import TwitterMixin, _build_fx_query
 
@@ -24,6 +25,14 @@ TV_CURRENCY_MAP = {
 }
 
 # TradingView symbol mapping for precious metals and commodities
+def _normalize_daily_index(index) -> pd.DatetimeIndex:
+    """Normalize any index to a timezone-free midnight DatetimeIndex."""
+    dates = pd.to_datetime(index)
+    if getattr(dates, "tz", None) is not None:
+        dates = dates.tz_convert(None)
+    return dates.normalize()
+
+
 TV_COMMODITY_MAP = {
     # Precious metals (USD prices)
     "ons-altin": ("OANDA", "XAUUSD"),
@@ -102,7 +111,7 @@ class FX(TechnicalMixin, TwitterMixin):
         Args:
             asset: Asset code (USD, EUR, gram-altin, BRENT, etc.)
         """
-        self._asset = asset
+        self._asset = resolve_asset_code(asset)
         self._canlidoviz = get_canlidoviz_provider()
         self._dovizcom = get_dovizcom_provider()
         self._tradingview = get_tradingview_provider()
@@ -182,6 +191,48 @@ class FX(TechnicalMixin, TwitterMixin):
                     # Fallback to bank_rates for currencies not supported by APIs
                     self._current_cache = self._current_from_bank_rates()
         return self._current_cache
+
+    @property
+    def current_in_try(self) -> dict[str, Any]:
+        """Return the current quote converted to Turkish lira.
+
+        Gold ounce and some commodities are quoted in US dollars by
+        canlidoviz.  The portfolio layer needs a single currency, so this
+        property converts them and keeps the original quote in
+        ``source_price`` / ``source_currency``.
+        """
+        info = dict(self.current or {})
+        if not info:
+            return info
+
+        currency = str(info.get("currency") or "TRY").upper()
+        if currency == "TRY":
+            return info
+
+        conversion_asset = "USD" if currency == "USD" else currency
+        try:
+            rate_info = FX(conversion_asset).current or {}
+            rate = float(rate_info.get("last") or 0)
+        except Exception:
+            rate = 0.0
+
+        if rate <= 0:
+            return {
+                **info,
+                "error": f"Conversion rate unavailable for {currency}",
+            }
+
+        converted = dict(info)
+        for key in ("last", "open", "high", "low"):
+            value = converted.get(key)
+            if value is not None:
+                converted[key] = float(value) * rate
+        converted["source_price"] = info.get("last")
+        converted["source_currency"] = currency
+        converted["currency"] = "TRY"
+        converted["conversion_rate"] = rate
+        converted["conversion_pair"] = f"{currency}TRY"
+        return converted
 
     def _current_from_bank_rates(self) -> dict[str, Any]:
         """Calculate current price from bank rates as fallback."""
@@ -362,7 +413,7 @@ class FX(TechnicalMixin, TwitterMixin):
                 )
 
             exchange, symbol = tv_info
-            return self._tradingview.get_history(
+            df = self._tradingview.get_history(
                 symbol=symbol,
                 period=period,
                 interval=interval,
@@ -370,6 +421,16 @@ class FX(TechnicalMixin, TwitterMixin):
                 end=end_dt,
                 exchange=exchange,
             )
+            spec = get_asset_spec(self._asset)
+            currency = spec.quote_currency if spec else "TRY"
+            df.attrs.update({
+                "symbol": self._asset,
+                "source": "tradingview",
+                "currency": currency,
+                "unit": spec.unit if spec else "unit",
+                "price_type": "intraday",
+            })
+            return df
 
         # Use canlidoviz/dovizcom for daily and above
         if self._use_canlidoviz():
@@ -380,12 +441,84 @@ class FX(TechnicalMixin, TwitterMixin):
                 end=end_dt,
             )
         else:
-            return self._dovizcom.get_history(
+            df = self._dovizcom.get_history(
                 asset=self._asset,
                 period=period,
                 start=start_dt,
                 end=end_dt,
             )
+            spec = get_asset_spec(self._asset)
+            df.attrs.update({
+                "symbol": self._asset,
+                "source": "doviz.com",
+                "currency": spec.quote_currency if spec else "TRY",
+                "unit": spec.unit if spec else "unit",
+                "price_type": "daily_close",
+            })
+            return df
+
+    def history_in_try(
+        self,
+        period: str = "1mo",
+        interval: str = "1d",
+        start: datetime | str | None = None,
+        end: datetime | str | None = None,
+    ) -> pd.DataFrame:
+        """Return history with all OHLC columns converted to Turkish lira.
+
+        Daily series are aligned by calendar date.  If a conversion rate is not
+        available for the requested range, the original series is returned
+        unchanged and the caller can inspect ``df.attrs['currency']``.
+        """
+        hist = self.history(period=period, interval=interval, start=start, end=end)
+        if hist.empty:
+            return hist
+
+        # Intraday series from different markets do not share timestamps;
+        # daily conversion is safe, intraday conversion is intentionally left
+        # in the source currency and marked in attrs.
+        if interval in ("1m", "5m", "15m", "30m", "1h", "4h"):
+            return hist
+
+        currency = str((hist.attrs or {}).get("currency") or "TRY").upper()
+        if currency == "TRY":
+            return hist
+
+        conversion_asset = "USD" if currency == "USD" else currency
+        try:
+            rate_hist = FX(conversion_asset).history(
+                period=period,
+                interval=interval,
+                start=start,
+                end=end,
+            )
+        except Exception:
+            return hist
+        if rate_hist.empty or "Close" not in rate_hist.columns:
+            return hist
+
+        rate_series = rate_hist["Close"].copy()
+        rate_series.index = _normalize_daily_index(rate_series.index)
+        rate_series = rate_series[~rate_series.index.duplicated(keep="last")].sort_index()
+
+        hist_dates = _normalize_daily_index(hist.index)
+        rate = rate_series.reindex(hist_dates, method="ffill")
+        if rate.isna().any():
+            rate = rate.bfill()
+        if rate.isna().any():
+            return hist
+
+        converted = hist.copy()
+        for column in ("Open", "High", "Low", "Close"):
+            if column in converted.columns:
+                converted[column] = converted[column].to_numpy() * rate.to_numpy()
+        converted.attrs = {
+            **hist.attrs,
+            "source_currency": currency,
+            "currency": "TRY",
+            "conversion_pair": f"{currency}TRY",
+        }
+        return converted
 
     def institution_history(
         self,

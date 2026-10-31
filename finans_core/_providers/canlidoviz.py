@@ -1,13 +1,14 @@
 """Canlidoviz.com provider for forex data - token-free alternative to doviz.com."""
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
 from bs4 import BeautifulSoup
 
 from finans_core._providers.base import BaseProvider
+from finans_core.assets import ASSET_SPECS, get_asset_spec, resolve_asset_code
 from finans_core.cache import TTL
 from finans_core.exceptions import APIError, DataNotAvailableError
 
@@ -106,18 +107,13 @@ class CanlidovizProvider(BaseProvider):
         "DVZSP1": 783, # Sepet Kur (Döviz Sepeti)
     }
 
-    # Precious metal IDs (TRY prices)
-    # Note: These IDs were verified against canlidoviz.com pages on 2026-01-13
+    # Precious metal IDs.  The identifiers live in finances_core.assets because
+    # the same metadata is used by the HTTP routes and the portfolio layer.
+    # Note: ons-altin is quoted in USD by canlidoviz, not in TRY.
     METAL_IDS = {
-        "gram-altin": 32,       # ~6,300 TRY (altin-fiyatlari/gram-altin)
-        "ceyrek-altin": 11,     # ~10,500 TRY
-        "yarim-altin": 47,      # ~21,000 TRY
-        "tam-altin": 14,        # ~42,000 TRY
-        "cumhuriyet-altin": 27, # ~43,000 TRY
-        "ata-altin": 43,        # ~43,000 TRY
-        "gram-gumus": 20,       # ~115 TRY (altin-fiyatlari/gumus)
-        "ons-altin": 81,        # ~104,000 TRY (ons in TRY)
-        "gram-platin": 1012,    # ~3,260 TRY (emtia-fiyatlari/platin-gram)
+        code: spec.canlidoviz_id
+        for code, spec in ASSET_SPECS.items()
+        if spec.canlidoviz_id is not None
     }
 
     # Energy IDs (USD prices)
@@ -396,6 +392,7 @@ class CanlidovizProvider(BaseProvider):
         Returns:
             Item ID or None if not found.
         """
+        asset = resolve_asset_code(asset)
         asset_upper = asset.upper()
 
         if institution:
@@ -427,7 +424,7 @@ class CanlidovizProvider(BaseProvider):
                 return self.BANK_CNY_IDS.get(inst_slug)
             elif asset == "gram-altin":
                 return self.BANK_GRAM_ALTIN_IDS.get(inst_slug)
-            elif asset == "gumus":
+            elif asset == "gram-gumus":
                 return self.BANK_GUMUS_IDS.get(inst_slug)
             elif asset == "gram-platin":
                 return self.BANK_PLATIN_IDS.get(inst_slug)
@@ -445,6 +442,36 @@ class CanlidovizProvider(BaseProvider):
 
         return None
 
+    def get_meta(self, asset: str) -> dict[str, Any]:
+        """Return canonical metadata for a currency or precious metal."""
+        canonical = resolve_asset_code(asset)
+        # canlidoviz quotes JPY per 100 yen.  unit_quantity tells callers how
+        # many source units one quote covers so a portfolio can normalise it.
+        unit_quantity = 100 if canonical.upper() == "JPY" else 1
+        spec = get_asset_spec(canonical)
+        if spec is not None:
+            return {
+                "code": spec.code,
+                "name": spec.name,
+                "kind": spec.kind,
+                "currency": spec.quote_currency,
+                "unit": spec.unit,
+                "unit_quantity": unit_quantity,
+                "canlidoviz_id": spec.canlidoviz_id,
+                "purity": spec.purity,
+                "total_weight_g": spec.total_weight_g,
+                "pure_gold_g": spec.pure_gold_g,
+            }
+        return {
+            "code": canonical,
+            "name": canonical,
+            "kind": "currency",
+            "currency": "TRY",
+            "unit": "unit",
+            "unit_quantity": unit_quantity,
+            "canlidoviz_id": self._get_item_id(canonical),
+        }
+
     def get_history(
         self,
         asset: str,
@@ -452,6 +479,8 @@ class CanlidovizProvider(BaseProvider):
         start: datetime | None = None,
         end: datetime | None = None,
         institution: str | None = None,
+        cache_ttl: int = TTL.OHLCV_HISTORY,
+        cache_scope: str = "history",
     ) -> pd.DataFrame:
         """
         Get historical OHLC data for a currency or metal.
@@ -462,14 +491,18 @@ class CanlidovizProvider(BaseProvider):
             start: Start date. Overrides period if provided.
             end: End date. Defaults to now.
             institution: Optional bank slug for bank-specific history.
+            cache_ttl: Cache lifetime in seconds.
+            cache_scope: Cache namespace so a short-lived quote fetch cannot
+                reuse a long-lived history entry for the same date range.
 
         Returns:
-            DataFrame with OHLC data indexed by Date.
+            DataFrame with OHLC data indexed by a timezone-aware ``date`` index.
 
         Raises:
             DataNotAvailableError: If asset is not supported.
             APIError: If API request fails.
         """
+        asset = resolve_asset_code(asset)
         item_id = self._get_item_id(asset, institution)
         if item_id is None:
             if institution:
@@ -496,7 +529,10 @@ class CanlidovizProvider(BaseProvider):
             }.get(period, 30)
             start_dt = end_dt - timedelta(days=days)
 
-        cache_key = f"canlidoviz:history:{asset}:{institution}:{start_dt.date()}:{end_dt.date()}"
+        cache_key = (
+            f"canlidoviz:{cache_scope}:{asset}:{institution}:"
+            f"{start_dt.date()}:{end_dt.date()}"
+        )
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
@@ -515,15 +551,17 @@ class CanlidovizProvider(BaseProvider):
             data = response.json()
 
             # Parse response: {"timestamp": "open|high|low|close", ...}
+            # Unix timestamps are UTC; keeping the timezone makes the output
+            # unambiguous for mobile clients.
             records = []
             for ts_str, ohlc_str in data.items():
                 try:
                     ts = int(ts_str)
-                    dt = datetime.fromtimestamp(ts)
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
                     values = ohlc_str.split("|")
                     if len(values) >= 4:
                         records.append({
-                            "Date": dt,
+                            "date": dt,
                             "Open": float(values[0]),
                             "High": float(values[1]),
                             "Low": float(values[2]),
@@ -533,11 +571,47 @@ class CanlidovizProvider(BaseProvider):
                     continue
 
             df = pd.DataFrame(records)
-            if not df.empty:
-                df.set_index("Date", inplace=True)
+            if df.empty:
+                df = pd.DataFrame(
+                    columns=["Open", "High", "Low", "Close"],
+                    index=pd.DatetimeIndex([], name="date", tz="UTC"),
+                )
+            else:
+                df.set_index("date", inplace=True)
+                df = df[~df.index.duplicated(keep="last")]
                 df.sort_index(inplace=True)
 
-            self._cache_set(cache_key, df, TTL.OHLCV_HISTORY)
+            meta = self.get_meta(asset)
+            unit_quantity = meta.get("unit_quantity", 1)
+
+            # canlidoviz sometimes reports the JPY "low" per single yen while
+            # the other candles cover 100 yen. Repair only obvious outliers.
+            if unit_quantity > 1 and not df.empty:
+                for column in ("Open", "High", "Low"):
+                    if column not in df.columns:
+                        continue
+                    mask = (
+                        (df[column] > 0)
+                        & (df["Close"] > 0)
+                        & (df[column] < df["Close"] / 10)
+                    )
+                    df.loc[mask, column] = df.loc[mask, column] * unit_quantity
+
+            if not df.empty and {"Open", "High", "Low", "Close"}.issubset(df.columns):
+                df["High"] = df[["High", "Open", "Close"]].max(axis=1)
+                df["Low"] = df[["Low", "Open", "Close"]].min(axis=1)
+
+            df.attrs.update({
+                "symbol": asset,
+                "source": "canlidoviz",
+                "source_item_id": item_id,
+                "currency": meta["currency"],
+                "unit": meta["unit"],
+                "unit_quantity": unit_quantity,
+                "price_type": "daily_close",
+            })
+
+            self._cache_set(cache_key, df, cache_ttl)
             return df
 
         except Exception as e:
@@ -545,9 +619,11 @@ class CanlidovizProvider(BaseProvider):
 
     def get_current(self, asset: str, institution: str | None = None) -> dict[str, Any]:
         """
-        Get current price for a currency or metal.
+        Get the latest available quote for a currency or metal.
 
-        Uses the most recent data point from history API.
+        canlidoviz exposes daily candles, so this is the latest daily close,
+        not an intraday last-trade price.  The response states that explicitly
+        through ``price_type``.
 
         Args:
             asset: Currency code (USD, EUR) or metal (gram-altin).
@@ -556,6 +632,7 @@ class CanlidovizProvider(BaseProvider):
         Returns:
             Dictionary with current price data.
         """
+        asset = resolve_asset_code(asset)
         item_id = self._get_item_id(asset, institution)
         if item_id is None:
             raise DataNotAvailableError(f"Unsupported asset: {asset}")
@@ -566,15 +643,33 @@ class CanlidovizProvider(BaseProvider):
             return cached
 
         try:
-            # Get recent history to extract latest price
-            df = self.get_history(asset, period="5d", institution=institution)
+            # The history cache normally lives for an hour.  Current quotes use
+            # a short-lived cache entry so a stale daily close cannot survive
+            # for a full hour.
+            df = self.get_history(
+                asset,
+                period="5d",
+                institution=institution,
+                cache_ttl=TTL.REALTIME_PRICE,
+                cache_scope="quote",
+            )
 
             if df.empty:
                 raise DataNotAvailableError(f"No data for {asset}")
 
-            # Get the most recent row
             latest = df.iloc[-1]
             latest_date = df.index[-1]
+            if hasattr(latest_date, "to_pydatetime"):
+                latest_dt = latest_date.to_pydatetime()
+            else:
+                latest_dt = latest_date
+            if latest_dt.tzinfo is None:
+                latest_dt = latest_dt.replace(tzinfo=timezone.utc)
+            age_seconds = max(
+                0,
+                int((datetime.now(timezone.utc) - latest_dt).total_seconds()),
+            )
+            meta = self.get_meta(asset)
 
             result = {
                 "symbol": asset,
@@ -582,13 +677,21 @@ class CanlidovizProvider(BaseProvider):
                 "open": float(latest["Open"]),
                 "high": float(latest["High"]),
                 "low": float(latest["Low"]),
+                "currency": meta["currency"],
+                "unit": meta["unit"],
+                "unit_quantity": meta.get("unit_quantity", 1),
+                "price_type": "daily_close",
+                "source": "canlidoviz",
+                "source_item_id": item_id,
                 "update_time": latest_date,
+                "updated_at": latest_date.isoformat(),
+                "age_seconds": age_seconds,
             }
 
             if institution:
                 result["institution"] = institution
 
-            self._cache_set(cache_key, result, TTL.FX_RATES)
+            self._cache_set(cache_key, result, TTL.REALTIME_PRICE)
             return result
 
         except Exception as e:

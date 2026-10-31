@@ -2,6 +2,13 @@ import os
 from dataclasses import dataclass
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class CacheNamespaceConfig:
     maxsize: int
@@ -13,11 +20,17 @@ class Settings:
     api_key: str = os.getenv("API_KEY", "OPEN")
     render_external_url: str | None = os.getenv("RENDER_EXTERNAL_URL")
     redis_url: str | None = os.getenv("REDIS_URL")
-    request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
+    request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
+    provider_timeout_seconds: int = int(os.getenv("PROVIDER_TIMEOUT_SECONDS", "15"))
     gzip_minimum_size: int = int(os.getenv("GZIP_MINIMUM_SIZE", "1024"))
     rate_limit_default_per_minute: int = int(os.getenv("RATE_LIMIT_DEFAULT_PER_MINUTE", "60"))
     rate_limit_application_per_minute: int = int(os.getenv("RATE_LIMIT_APPLICATION_PER_MINUTE", "300"))
     cors_allow_origins: tuple[str, ...] = tuple(filter(None, os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")))
+    # Both background jobs compete with user requests on a 0.1 vCPU instance,
+    # so they stay opt-in.
+    cache_warmer_enabled: bool = _env_flag("CACHE_WARMER_ENABLED")
+    keep_alive_enabled: bool = _env_flag("KEEP_ALIVE_ENABLED")
+    keep_alive_interval_seconds: int = int(os.getenv("KEEP_ALIVE_INTERVAL_SECONDS", "840"))
     realtime_cache: CacheNamespaceConfig = CacheNamespaceConfig(maxsize=500, ttl_seconds=30)
     market_cache: CacheNamespaceConfig = CacheNamespaceConfig(maxsize=200, ttl_seconds=60)
     static_cache: CacheNamespaceConfig = CacheNamespaceConfig(maxsize=1000, ttl_seconds=86400)

@@ -50,9 +50,20 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 | :--- | :--- | :--- |
 | `API_KEY` | `OPEN` | API güvenlik anahtarı. `OPEN` bırakıldığında genel kullanıma açıktır. |
 | `REDIS_URL` | *(Boş)* | Redis bağlantı URL'i. Boş bırakılırsa bellek içi (in-memory) TTL önbellek kullanılır. |
-| `REQUEST_TIMEOUT_SECONDS` | `30` | Harici veri istekleri için zaman aşımı süresi (saniye). |
+| `REQUEST_TIMEOUT_SECONDS` | `20` | HTTP isteği için üst süre (saniye). |
+| `PROVIDER_TIMEOUT_SECONDS` | `15` | Veri sağlayıcısına yapılan tek istek için zaman aşımı (saniye). |
 | `CORS_ALLOW_ORIGINS` | `*` | İzin verilen CORS adresleri (virgülle ayrılmış). |
-| `EVDS_API_KEY` | *(Opsiyonel)* | TCMB EVDS serilerini indirmek için kullanıcı anahtarı. |
+| `EVDS_API_KEY` | *(Opsiyonel)* | TCMB EVDS serilerini indirmek için kullanıcı anahtarı (`EVDS_KEY` de kabul edilir). |
+| `DOVIZCOM_TOKEN` | *(Opsiyonel)* | doviz.com için yedek Bearer anahtarı. Tanımlı değilse token siteden taranır ve yoksa istek anahtarsız gönderilir. |
+| `CACHE_WARMER_ENABLED` | `0` | Açılırsa arka plan önbellek ısıtıcısı çalışır. Ücretsiz Render planında varsayılan olarak kapalıdır. |
+| `KEEP_ALIVE_ENABLED` | `0` | Açılırsa servis kendisine periyodik ping atar. Ücretsiz plan kotasını tüketir. |
+
+### Render ücretsiz plan notları
+
+* Örnek başına 512 MB bellek, 0,1 vCPU ve ayda 750 örnek saati vardır. `render.yaml` bu nedenle **tek Gunicorn işçisi** ile çalışır; eşzamanlılık G/Ç bekleyen isteklerde iş parçacığı havuzundan gelir.
+* 15 dakika istek almazsa servis uykuya geçer; ilk istek 30-60 saniye sürebilir.
+* Giden IP yurt dışındadır. TCMB, EVDS, TEFAS ve KAP gibi Türkiye merkezli kaynaklar zaman zaman yavaşlayabilir veya isteği reddedebilir. `GET /ops/providers` hangi kaynağın erişilebilir olduğunu ölçer.
+* Önbellek bellek içidir; yeniden başlatmada sıfırlanır. Kalıcı disk ve Redis ücretsiz planda yoktur.
 
 ---
 
@@ -63,6 +74,7 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /ops/health` — Sistem kaynakları ve önbellek sağlık durumu.
 * `GET /ops/cache` — Bellek ve Redis önbellek istatistikleri.
 * `GET /ops/ready` — Servis hazır olma durumu.
+* `GET /ops/providers` — canlidoviz, doviz.com, TCMB, EVDS, TEFAS, TradingView, BtcTurk, KAP ve Borsa İstanbul erişilebilirlik testi (durum kodu ve gecikme ile).
 
 ### 2. Hisse Senetleri (`/stocks`)
 * `GET /stocks/list` — BIST şirketler listesi (sayfalama destekli).
@@ -113,10 +125,12 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 
 ### 5. Döviz & Altın Matrisi (`/fx`)
 * `GET /fx/list` — Desteklenen para birimleri ve kurumlar.
+* `GET /fx/assets` — **Varlık kataloğu**: para birimleri ile altın, gümüş, platin ve enerji ürünlerinin saflık, ağırlık ve kaynak kimlikleri. `kind=gold` gibi filtre kabul eder.
 * `GET /fx/convert?from=USD&to=TRY&amount=100` — **Canlı döviz, altın ve TL çevirici / hesap makinesi** (Örn: USD, EUR, gram-altin, ceyrek-altin).
-* `GET /fx/gold/all` — **Tüm altın türleri matrisi** (Gram, 22 Ayar Bilezik, 18/14 Ayar, Çeyrek, Yarım, Tam, Ata, Gremse, Reşat, Ons).
-* `GET /fx/{asset}` — Döviz veya altın anlık kuru (Örn: `USD`, `gram-altin`, `22-ayar-bilezik`).
-* `GET /fx/{asset}/history` — Tarihsel döviz/altın grafiği.
+* `GET /fx/gold/all` — **Altın matrisi** (Gram, Has, 22 Ayar Bilezik, 18/14 Ayar, Çeyrek, Yarım, Tam, Cumhuriyet, Ata, Gremse, Reşat, Ons). Fiyatlar önce canlı kotasyondan alınır; yalnızca kotasyon alınamazsa `source: "formula"` etiketiyle gram altından hesaplanır.
+* `GET /fx/quotes?symbols=USD,gram-altin,ons-altin` — **Toplu fiyat sorgusu**; en fazla 30 varlık, tek istekte.
+* `GET /fx/{asset}` — Döviz veya altın anlık kuru (Örn: `USD`, `gram-altin`, `22-ayar-bilezik`). Varsayılan `quote=TRY`; `quote=SOURCE` kaynak para birimini döndürür. `ons-altin` Türk lirasına çevrilir, `ons-altin-usd` veya `quote=SOURCE` Amerikan doları verir.
+* `GET /fx/{asset}/history?period=1mo&quote=TRY&envelope=true` — Tarihsel döviz/altın grafiği. Her satırda `date` alanı bulunur; ons serisi varsayılan olarak Türk lirasına çevrilir ve dönüşüm bilgisi zarf içinde raporlanır.
 * `GET /fx/{asset}/bank-rates` — Bankaların anlık alış-satış kurları ve makas farkları.
 * `GET /fx/{asset}/institution-rates` — Kapalıçarşı ve serbest piyasa kurum kurları.
 
@@ -131,9 +145,9 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /eurobonds/list` — Türkiye Eurobond getirileri ve kupon oranları.
 
 ### 8. Ekonomi Takvimi & TCMB (`/market/economy`)
-* `GET /market/economy/rates` — TCMB resmi kurları.
+* `GET /market/economy/rates` — TCMB politika faizi, gecelik koridor ve geç likidite penceresi oranları.
 * `GET /market/economy/calendar` — Günlük/haftalık ekonomik takvim.
-* `GET /market/economy/inflation` — TÜİK resmi TÜFE enflasyon oranları ve hesaplayıcı.
+* `GET /market/economy/inflation` — Son açıklanan TÜFE ve ÜFE oranları (hesaplayıcı değil, özet).
 * `GET /market/tax` — Finansal enstrümanlar güncel stopaj tablosu.
 * `GET /evds/categories` & `/evds/search` — TCMB EVDS veri kategorileri ve serileri.
 
@@ -168,4 +182,6 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 
 ## 🔒 Güvenlik & Gizlilik
 * Bu proje **açık kaynaklı ve kamuya açık (public)** çalışacak şekilde geliştirilmiştir.
-* Kod tabanında hiçbir sabit token, şifre veya özel bağlantı barındırılmaz.
+* Kod tabanında sabit token veya şifre bulunmaz. doviz.com anahtarı yalnızca `DOVIZCOM_TOKEN` ortam değişkeninden okunur.
+* TEFAS ve İş Yatırım isteklerinde TLS sertifika doğrulaması açıktır.
+* `CORS_ALLOW_ORIGINS=*` iken tarayıcı kimlik bilgisi paylaşımı otomatik olarak kapatılır.

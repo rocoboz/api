@@ -40,10 +40,12 @@ def create_app() -> FastAPI:
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    allow_any_origin = "*" in settings.cors_allow_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_allow_origins),
-        allow_credentials=True,
+        # Wildcard origin and credentials cannot be combined; browsers reject it.
+        allow_credentials=not allow_any_origin,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -68,18 +70,20 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
-        start_cache_warmer()
+        if settings.cache_warmer_enabled:
+            start_cache_warmer()
 
-        async def ping_regularly():
-            target_url = settings.render_external_url or "https://api-2vxc.onrender.com"
-            while True:
-                await asyncio.sleep(10 * 60)
-                try:
-                    async with httpx.AsyncClient(timeout=5.0) as client:
-                        await client.get(f"{target_url}/ping")
-                except Exception:
-                    pass
+        if settings.keep_alive_enabled and settings.render_external_url:
+            async def ping_regularly():
+                target_url = settings.render_external_url.rstrip("/")
+                while True:
+                    await asyncio.sleep(settings.keep_alive_interval_seconds)
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            await client.get(f"{target_url}/ping")
+                    except Exception:
+                        pass
 
-        asyncio.create_task(ping_regularly())
+            asyncio.create_task(ping_regularly())
 
     return app

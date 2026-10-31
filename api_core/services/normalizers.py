@@ -5,6 +5,7 @@ import unicodedata
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from api_core.services.response import now_iso
 
@@ -49,6 +50,20 @@ def df_to_json(data: Any) -> list[dict[str, Any]]:
         return [{k: clean_json_val(v) for k, v in item.items()} if isinstance(item, dict) else item for item in data]
     if hasattr(data, "empty") and data.empty:
         return []
+
+    # History frames use a DatetimeIndex.  Without reset_index() the date is
+    # silently dropped by orient="records", which makes charts impossible.
+    if hasattr(data, "index"):
+        index = data.index
+        if isinstance(index, pd.DatetimeIndex) or (
+            index.name and not isinstance(index, pd.RangeIndex)
+        ):
+            data = data.reset_index()
+            if "index" in data.columns and "date" not in data.columns:
+                data = data.rename(columns={"index": "date"})
+    if "Date" in data.columns and "date" not in data.columns:
+        data = data.rename(columns={"Date": "date"})
+
     return json.loads(data.to_json(orient="records", date_format="iso"))
 
 

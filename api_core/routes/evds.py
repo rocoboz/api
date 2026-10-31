@@ -11,8 +11,9 @@ from finans_core import EVDS, EVDSSeries, evds_categories, evds_download, evds_s
 
 router = APIRouter(prefix="/evds", tags=["evds"])
 
-# Initialize EVDS key on startup if provided via environment
-env_evds_key = os.getenv("EVDS_KEY")
+# Initialize EVDS key on startup if provided via environment.  The provider
+# reads EVDS_API_KEY; accept the shorter EVDS_KEY used by older deployments.
+env_evds_key = os.getenv("EVDS_KEY") or os.getenv("EVDS_API_KEY")
 if env_evds_key:
     set_evds_key(env_evds_key)
 

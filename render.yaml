@@ -4,15 +4,30 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 2 --threads 4 --timeout 120
+    # 0.1 vCPU / 512 MB: one worker avoids duplicating the in-memory cache and
+    # the interpreter footprint.  Requests are I/O bound, so FastAPI's thread
+    # pool still serves concurrent calls.
+    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --workers 1 --timeout 120
+    healthCheckPath: /ops/health
     envVars:
       - key: API_KEY
         sync: false
       - key: RENDER_EXTERNAL_URL
         sync: false
       - key: REQUEST_TIMEOUT_SECONDS
-        value: "30"
+        value: "20"
+      - key: PROVIDER_TIMEOUT_SECONDS
+        value: "12"
       - key: GZIP_MINIMUM_SIZE
         value: "1024"
       - key: CORS_ALLOW_ORIGINS
         value: "*"
+      # Background warming and the keep-alive ping are off by default. Turn
+      # them on only if the instance has spare capacity: together they can
+      # consume most of the 750 free instance hours and compete for the CPU.
+      - key: CACHE_WARMER_ENABLED
+        value: "0"
+      - key: KEEP_ALIVE_ENABLED
+        value: "0"
+      - key: KEEP_ALIVE_INTERVAL_SECONDS
+        value: "840"

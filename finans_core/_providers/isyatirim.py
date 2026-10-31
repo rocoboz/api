@@ -60,7 +60,7 @@ class IsYatirimProvider(BaseProvider):
     }
 
     def __init__(self):
-        super().__init__(verify=False)
+        super().__init__()
 
     def get_realtime_quote(self, symbol: str) -> dict[str, Any]:
         """

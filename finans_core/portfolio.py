@@ -21,6 +21,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
+from finans_core.assets import ASSET_SPECS, resolve_asset_code
 from finans_core.crypto import Crypto
 from finans_core.fund import Fund
 from finans_core.fx import FX
@@ -48,8 +49,9 @@ FX_CURRENCIES = {
 
 # Precious metals and commodities
 FX_METALS = {
-    "gram-altin", "ceyrek-altin", "yarim-altin", "tam-altin",
-    "cumhuriyet-altin", "ata-altin", "ons-altin", "gram-gumus", "gram-platin",
+    code
+    for code, spec in ASSET_SPECS.items()
+    if spec.kind in ("gold", "silver", "platinum", "palladium")
 }
 
 FX_COMMODITIES = {"BRENT", "XAG-USD", "XPT-USD", "XPD-USD"}
@@ -83,14 +85,15 @@ def _detect_asset_type(symbol: str) -> AssetType:
     Returns:
         Detected asset type.
     """
-    upper = symbol.upper()
+    canonical = resolve_asset_code(symbol)
+    upper = canonical.upper()
 
     # Currency check
-    if upper in FX_CURRENCIES or symbol in FX_METALS or upper in FX_COMMODITIES:
+    if upper in FX_CURRENCIES or canonical in FX_METALS or upper in FX_COMMODITIES:
         return "fx"
 
     # Crypto check (BTCTRY, ETHTRY, etc.)
-    if symbol.endswith("TRY") and len(symbol) > 5:
+    if upper.endswith("TRY") and len(upper) > 5:
         return "crypto"
 
     # Default to stock (user can override with asset_type="fund")
@@ -660,9 +663,22 @@ class Portfolio(TechnicalMixin):
         for symbol, holding in self._holdings.items():
             asset = self._get_or_create_asset(symbol, holding.asset_type)
             try:
-                hist = asset.history(period=period)
+                hist = (
+                    asset.history_in_try(period=period)
+                    if isinstance(asset, FX)
+                    else asset.history(period=period)
+                )
                 if hist.empty:
                     continue
+
+                # Mixed sources (canlidoviz in UTC, TradingView in exchange
+                # time) must share a timezone-free daily index before the
+                # holdings are joined.
+                if isinstance(hist.index, pd.DatetimeIndex):
+                    hist = hist.copy()
+                    if hist.index.tz is not None:
+                        hist.index = hist.index.tz_convert(None)
+                    hist.index = hist.index.normalize()
 
                 # Filter by purchase_date if set
                 if holding.purchase_date:
@@ -677,7 +693,12 @@ class Portfolio(TechnicalMixin):
 
                 # Use Close for stocks/index, Price for funds
                 price_col = "Close" if "Close" in hist.columns else "Price"
-                all_prices[symbol] = hist[price_col] * holding.shares
+                series = hist[price_col]
+                if isinstance(asset, FX):
+                    unit_quantity = float(hist.attrs.get("unit_quantity") or 1)
+                    if unit_quantity > 1:
+                        series = series / unit_quantity
+                all_prices[symbol] = series * holding.shares
             except Exception:
                 continue
 
@@ -989,8 +1010,12 @@ class Portfolio(TechnicalMixin):
             elif isinstance(asset, Crypto):
                 return asset.fast_info.last_price or 0
             elif isinstance(asset, FX):
-                current = asset.current
-                return current.get("last", 0) if current else 0
+                current = asset.current_in_try
+                if not current:
+                    return 0
+                # Quotes such as JPY cover 100 source units.
+                unit_quantity = float(current.get("unit_quantity") or 1)
+                return float(current.get("last") or 0) / unit_quantity
             elif isinstance(asset, Fund):
                 info = asset.info
                 return info.get("price", 0) if info else 0

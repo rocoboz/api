@@ -174,11 +174,22 @@ def get_market_overview(request: Request, response: Response):
             try:
                 gram = FX("gram-altin").current or {}
                 gram_price = float(gram.get("last") or 0)
-                gold["gram_altin"] = round(gram_price, 2)
-                gold["ceyrek_altin"] = round(gram_price * 1.6065 * 1.04, 2) if gram_price > 0 else None
-                gold["ons_altin_usd"] = float(FX("ons-altin-usd").current.get("last") or 0)
+                gold["gram_altin"] = round(gram_price, 2) if gram_price > 0 else None
             except Exception:
-                pass
+                gold["gram_altin"] = None
+            try:
+                ceyrek = FX("ceyrek-altin").current or {}
+                ceyrek_price = float(ceyrek.get("last") or 0)
+                gold["ceyrek_altin"] = round(ceyrek_price, 2) if ceyrek_price > 0 else None
+            except Exception:
+                gold["ceyrek_altin"] = None
+            try:
+                # ons-altin is quoted in US dollars by canlidoviz (item 12).
+                ons = FX("ons-altin").current or {}
+                ons_price = float(ons.get("last") or 0)
+                gold["ons_altin_usd"] = round(ons_price, 2) if ons_price > 0 else None
+            except Exception:
+                gold["ons_altin_usd"] = None
             return gold
 
         def fetch_movers():

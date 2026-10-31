@@ -101,6 +101,10 @@ class TCMBRatesProvider(BaseProvider):
                     "lending": lending,
                 })
 
+        # TCMB lists the oldest decision first; every caller expects the
+        # newest decision at index 0.
+        results.sort(key=lambda item: item["date"], reverse=True)
+
         # Cache for 5 minutes
         self._cache_set(cache_key, results, TTL.FX_RATES)
         return results

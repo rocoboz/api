@@ -7,6 +7,7 @@ Note: For currencies, metals, and energy use canlidoviz.py instead (token-free).
 This provider is mainly used for bank_rates and institution_rates scraping.
 """
 
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -31,8 +32,6 @@ class DovizcomProvider(BaseProvider):
     BASE_URL = "https://api.doviz.com/api/v12"
     KUR_BASE_URL = "https://kur.doviz.com"
     TOKEN_EXPIRY = 3600  # 1 hour
-
-    FALLBACK_TOKEN = "***REMOVED***"
 
     # Bank slug mapping for kur.doviz.com
     BANK_SLUGS = {
@@ -178,8 +177,13 @@ class DovizcomProvider(BaseProvider):
         self._token: str | None = None
         self._token_expiry: float = 0
 
-    def _get_token(self) -> str:
-        """Get valid Bearer token."""
+    def _get_token(self) -> str | None:
+        """Return a Bearer token or None when none is available.
+
+        The token is scraped from the public site first.  A deployment may
+        supply its own token through DOVIZCOM_TOKEN; no token is compiled into
+        the source tree.
+        """
         if self._token and time.time() < self._token_expiry:
             return self._token
 
@@ -193,8 +197,8 @@ class DovizcomProvider(BaseProvider):
         except Exception:
             pass
 
-        # Use fallback
-        return self.FALLBACK_TOKEN
+        env_token = os.getenv("DOVIZCOM_TOKEN", "").strip()
+        return env_token or None
 
     def _extract_token(self) -> str | None:
         """Extract token from doviz.com website."""
@@ -227,15 +231,16 @@ class DovizcomProvider(BaseProvider):
             origin = "https://www.doviz.com"
 
         token = self._get_token()
-
-        return {
+        headers = {
             "Accept": "*/*",
-            "Authorization": f"Bearer {token}",
             "Origin": origin,
             "Referer": f"{origin}/",
             "User-Agent": self.DEFAULT_HEADERS["User-Agent"],
             "X-Requested-With": "XMLHttpRequest",
         }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def get_current(self, asset: str) -> dict[str, Any]:
         """
