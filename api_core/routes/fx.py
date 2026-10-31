@@ -558,7 +558,10 @@ def get_fx_history(
             "data": rows,
         }
 
-    return get_cached_realtime(f"FX_HIST_{asset}_{period}_{interval}_{quote_upper}", fetch)
+    envelope_key = int(bool(envelope))
+    return get_cached_realtime(
+        f"FX_HIST_{asset}_{period}_{interval}_{quote_upper}_{envelope_key}", fetch
+    )
 
 
 @router.get("/{asset}/bank-rates")
