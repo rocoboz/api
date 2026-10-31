@@ -60,8 +60,11 @@ class DovizcomTahvilProvider(BaseProvider):
             response = self._get(self.BASE_URL)
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Find the commodities table
-            table = soup.find("table", {"id": "commodities"})
+            # The bond table used to be "commodities"; the current page uses
+            # "bonds".  Keep both so a layout rollback does not break yields.
+            table = soup.find("table", {"id": "bonds"}) or soup.find(
+                "table", {"id": "commodities"}
+            )
             if not table:
                 raise DataNotAvailableError("Bond table not found on page")
 
@@ -77,13 +80,17 @@ class DovizcomTahvilProvider(BaseProvider):
                     if len(cells) < 3:
                         continue
 
-                    # Parse bond name and URL
-                    name_link = cells[0].find("a", class_="name")
-                    if not name_link:
+                    # Parse bond name and URL.  The current page wraps the name
+                    # in a plain anchor without a class.
+                    name_link = cells[0].find("a")
+                    name = (
+                        name_link.get_text(" ", strip=True)
+                        if name_link
+                        else cells[0].get_text(" ", strip=True)
+                    )
+                    url = name_link.get("href", "") if name_link else ""
+                    if not name:
                         continue
-
-                    name = name_link.text.strip()
-                    url = name_link.get("href", "")
 
                     # Parse current yield
                     yield_text = cells[1].text.strip()

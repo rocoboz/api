@@ -175,7 +175,8 @@ class Portfolio(TechnicalMixin):
                         Valid values: "stock", "fx", "crypto", "fund"
             purchase_date: Date when the asset was purchased.
                           Accepts string (YYYY-MM-DD), date, or datetime.
-                          If None, defaults to today.
+                          If None, the asset is assumed to have been held for
+                          the full requested history.
 
         Returns:
             Self for method chaining.
@@ -210,8 +211,6 @@ class Portfolio(TechnicalMixin):
                 parsed_date = purchase_date.date()
             elif isinstance(purchase_date, date):
                 parsed_date = purchase_date
-        else:
-            parsed_date = date.today()
 
         self._holdings[symbol] = Holding(
             symbol=symbol,
@@ -646,8 +645,8 @@ class Portfolio(TechnicalMixin):
         Get historical portfolio value based on current holdings.
 
         Note: Uses current share counts - does not track historical trades.
-        When purchase_date is set for a holding, only data from that date
-        onwards is included in the portfolio value calculation.
+        When purchase_date is set for a holding, history starts at the latest
+        purchase date so every holding in the portfolio is fully covered.
 
         Args:
             period: Period for historical data (1d, 5d, 1mo, 3mo, 6mo, 1y).
@@ -677,7 +676,9 @@ class Portfolio(TechnicalMixin):
                 if isinstance(hist.index, pd.DatetimeIndex):
                     hist = hist.copy()
                     if hist.index.tz is not None:
-                        hist.index = hist.index.tz_convert(None)
+                        # Keep the wall-clock date of each daily candle; a UTC
+                        # conversion of local midnight shifts it one day back.
+                        hist.index = hist.index.tz_localize(None)
                     hist.index = hist.index.normalize()
 
                 # Filter by purchase_date if set
@@ -705,8 +706,18 @@ class Portfolio(TechnicalMixin):
         if not all_prices:
             return pd.DataFrame(columns=["Value", "Daily_Return"])
 
-        df = pd.DataFrame(all_prices)
-        df = df.dropna(how="all")
+        df = pd.DataFrame(all_prices).sort_index()
+        # Sources cover different trading calendars.  Without forward filling,
+        # a date present for only one asset sums a partial portfolio and shows
+        # up as a fake double-digit drop.
+        df = df.ffill().dropna(how="all")
+        active = df.notna().all(axis=1)
+        # Rows before every asset has a quote value only part of the portfolio.
+        # Keeping them makes total return and drawdown compare an incomplete
+        # portfolio with the current one, so history starts on the first date
+        # where the full composition is covered.
+        if active.any():
+            df = df.loc[active.idxmax():]
         df["Value"] = df.sum(axis=1)
         df["Daily_Return"] = df["Value"].pct_change()
         return df[["Value", "Daily_Return"]]
@@ -761,103 +772,126 @@ class Portfolio(TechnicalMixin):
         """
         df = self.history(period=period)
 
+        def _clean(value: Any, digits: int = 2) -> float | None:
+            if value is None:
+                return None
+            value = float(value)
+            if np.isnan(value) or np.isinf(value):
+                return None
+            return round(value, digits)
+
         if df.empty or len(df) < 20:
             return {
-                "annualized_return": np.nan,
-                "annualized_volatility": np.nan,
-                "sharpe_ratio": np.nan,
-                "sortino_ratio": np.nan,
-                "max_drawdown": np.nan,
-                "beta": np.nan,
-                "alpha": np.nan,
-                "risk_free_rate": np.nan,
+                "annualized_return": None,
+                "annualized_volatility": None,
+                "sharpe_ratio": None,
+                "sortino_ratio": None,
+                "max_drawdown": None,
+                "beta": None,
+                "alpha": None,
+                "risk_free_rate": None,
+                "risk_free_rate_source": "unavailable",
+                "benchmark": self._benchmark,
                 "trading_days": 0,
             }
 
         daily_returns = df["Daily_Return"].dropna()
         trading_days = len(daily_returns)
-        annualization = 252
 
-        # Annualized return
+        # Sources mix business-day and calendar-day calendars.  Annualization
+        # must follow the observed span and frequency, not a fixed 252.
+        dates = pd.to_datetime(df.index)
+        if getattr(dates, "tz", None) is not None:
+            dates = dates.tz_localize(None)
+        span_days = max((dates[-1] - dates[0]).days, 1)
+        years = span_days / 365.25
+        periods_per_year = trading_days / years
+
         total_return = (df["Value"].iloc[-1] / df["Value"].iloc[0]) - 1
-        years = trading_days / annualization
         ann_return = ((1 + total_return) ** (1 / years) - 1) * 100
 
-        # Annualized volatility
         daily_volatility = daily_returns.std()
-        ann_volatility = daily_volatility * np.sqrt(annualization) * 100
+        ann_volatility = daily_volatility * np.sqrt(periods_per_year) * 100
 
-        # Get risk-free rate
-        if risk_free_rate is None:
+        # A missing risk-free rate must stay missing instead of silently
+        # pretending to be 30%.
+        rf: float | None
+        rf_source: str
+        if risk_free_rate is not None:
+            rf = risk_free_rate * 100
+            rf_source = "request"
+        else:
+            rf = None
+            rf_source = "unavailable"
             try:
                 from finans_core.bond import risk_free_rate as get_rf_rate
-                rf = get_rf_rate() * 100  # Convert to percentage
+                rf_decimal = get_rf_rate()
             except Exception:
-                rf = 30.0  # Fallback
-        else:
-            rf = risk_free_rate * 100
+                rf_decimal = None
+            if rf_decimal is not None:
+                rf = rf_decimal * 100
+                rf_source = "10y_bond"
 
-        # Sharpe Ratio
-        if ann_volatility > 0:
+        sharpe = None
+        if rf is not None and ann_volatility > 0:
             sharpe = (ann_return - rf) / ann_volatility
-        else:
-            sharpe = np.nan
 
-        # Sortino Ratio (downside deviation)
+        sortino = None
         negative_returns = daily_returns[daily_returns < 0]
-        if len(negative_returns) > 0:
-            downside_deviation = negative_returns.std() * np.sqrt(annualization) * 100
+        if rf is not None and len(negative_returns) > 0:
+            downside_deviation = negative_returns.std() * np.sqrt(periods_per_year) * 100
             if downside_deviation > 0:
                 sortino = (ann_return - rf) / downside_deviation
-            else:
-                sortino = np.nan
-        else:
-            sortino = np.inf  # No negative returns
 
-        # Maximum Drawdown
-        cumulative = (1 + daily_returns).cumprod()
-        running_max = cumulative.cummax()
-        drawdowns = (cumulative - running_max) / running_max
+        values = df["Value"].dropna()
+        running_max = values.cummax()
+        drawdowns = values / running_max - 1
         max_drawdown = drawdowns.min() * 100
 
-        # Beta and Alpha (vs benchmark)
-        beta = np.nan
-        alpha = np.nan
-
+        beta = None
+        alpha = None
         try:
             bench = Index(self._benchmark)
             bench_hist = bench.history(period=period)
-            if not bench_hist.empty:
-                bench_returns = bench_hist["Close"].pct_change().dropna()
+            if not bench_hist.empty and "Close" in bench_hist.columns:
+                if isinstance(bench_hist.index, pd.DatetimeIndex):
+                    bench_hist = bench_hist.copy()
+                    bench_index = bench_hist.index
+                    if bench_index.tz is not None:
+                        bench_index = bench_index.tz_localize(None)
+                    bench_hist.index = bench_index.normalize()
+                    bench_hist = bench_hist[~bench_hist.index.duplicated(keep="last")]
 
-                # Align dates
+                bench_returns = bench_hist["Close"].pct_change().dropna()
                 common_dates = daily_returns.index.intersection(bench_returns.index)
                 if len(common_dates) >= 20:
                     port_ret = daily_returns.loc[common_dates]
                     bench_ret = bench_returns.loc[common_dates]
-
-                    # Beta = Cov(Rp, Rm) / Var(Rm)
-                    covariance = port_ret.cov(bench_ret)
                     variance = bench_ret.var()
                     if variance > 0:
-                        beta = covariance / variance
+                        beta = port_ret.cov(bench_ret) / variance
 
-                        # Alpha = Rp - Rf - Beta * (Rm - Rf)
-                        bench_total = (bench_hist["Close"].iloc[-1] / bench_hist["Close"].iloc[0]) - 1
-                        bench_ann = ((1 + bench_total) ** (1 / years) - 1) * 100
-                        alpha = ann_return - rf - beta * (bench_ann - rf)
+                        if rf is not None:
+                            bench_window = bench_hist.loc[common_dates, "Close"]
+                            bench_years = (common_dates[-1] - common_dates[0]).days / 365.25
+                            if bench_years > 0:
+                                bench_total = bench_window.iloc[-1] / bench_window.iloc[0] - 1
+                                bench_ann = ((1 + bench_total) ** (1 / bench_years) - 1) * 100
+                                alpha = ann_return - rf - beta * (bench_ann - rf)
         except Exception:
             pass
 
         return {
-            "annualized_return": round(ann_return, 2),
-            "annualized_volatility": round(ann_volatility, 2),
-            "sharpe_ratio": round(sharpe, 2) if not np.isnan(sharpe) else np.nan,
-            "sortino_ratio": round(sortino, 2) if not np.isnan(sortino) and not np.isinf(sortino) else sortino,
-            "max_drawdown": round(max_drawdown, 2),
-            "beta": round(beta, 2) if not np.isnan(beta) else np.nan,
-            "alpha": round(alpha, 2) if not np.isnan(alpha) else np.nan,
-            "risk_free_rate": round(rf, 2),
+            "annualized_return": _clean(ann_return),
+            "annualized_volatility": _clean(ann_volatility),
+            "sharpe_ratio": _clean(sharpe),
+            "sortino_ratio": _clean(sortino),
+            "max_drawdown": _clean(max_drawdown),
+            "beta": _clean(beta),
+            "alpha": _clean(alpha),
+            "risk_free_rate": _clean(rf),
+            "risk_free_rate_source": rf_source,
+            "benchmark": self._benchmark,
             "trading_days": trading_days,
         }
 

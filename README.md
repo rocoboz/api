@@ -32,7 +32,11 @@ Sunucu varsayılan olarak `http://127.0.0.1:8000` adresinde başlar.
 ### 2. Testleri Çalıştırma
 
 ```bash
-# Yerel test
+# Çevrimdışı sözleşme testleri (ağ erişimi gerektirmez)
+.venv/Scripts/python.exe tests/test_fx_contract.py
+.venv/Scripts/python.exe tests/test_portfolio_contract.py
+
+# Yerel entegrasyon testi
 python test_api.py
 
 # Canlı sunucuyu test etmek için
@@ -155,9 +159,36 @@ Uygulama kamuya açık verilerle sıfır API anahtarıyla çalışacak şekilde 
 * `GET /calculator/compound?initial=10000&monthly=2500&years=5&annual_rate=40` — **Bileşik getiri ve düzenli birikim büyüme simülatörü** (Yıllık döküm ve toplam kâr analizi).
 
 ### 10. Portföy Simülasyonu & Backtest (POST)
-* `POST /portfolio/analysis` — Portföy risk metrikleri (Sharpe, Volatilite, Alfa, Beta).
-* `POST /portfolio/rebalance` — Hedef ağırlıklara göre portföy dengeleme hesabı.
+* `POST /portfolio/analysis` — Portföy analizi: güncel değer, maliyet, kâr/zarar, varlık dağılımı, değer geçmişi ve risk metrikleri (yıllık getiri, volatilite, Sharpe, Sortino, maksimum düşüş, Beta, Alfa).
+* `POST /portfolio/rebalance` — Hedef ağırlıklara göre sapma ve dengeleme planı.
 * `POST /backtest/run` — BIST hisseleri üzerinde teknik strateji simülasyonu.
+
+Portföy istek gövdesi:
+
+```json
+{
+  "holdings": [
+    {
+      "symbol": "gram-altin",
+      "shares": 10,
+      "cost": 5000,
+      "asset_type": "fx",
+      "purchase_date": "2026-01-15"
+    }
+  ],
+  "benchmark": "XU100",
+  "period": "1y",
+  "risk_free_rate": null
+}
+```
+
+Sözleşme notları:
+* `asset_type` yalnızca `stock`, `fx`, `crypto`, `fund` değerlerini alır; başka bir değer **HTTP 422** döndürür. Fonlar için açıkça `"fund"` gönderilmelidir.
+* `purchase_date` `YYYY-MM-DD` biçiminde veya `null` olabilir. `null` ise varlık tüm geçmiş boyunca elde tutulmuş kabul edilir. Geçersiz tarih **HTTP 422** döndürür.
+* Değer geçmişi, farklı işlem takvimlerini ileri doldurma ile hizalar. Tüm varlıkların kotasyonu bulunan ilk tarihten başlar; eksik varlıkla toplanan kısmi portföy değerleri geçmişe ve risk metriklerine dahil edilmez.
+* Risksiz faiz isteğe bağlıdır. Gönderilmezse 10 yıllık devlet tahvili getirisi kullanılır ve `risk_free_rate_source` alanı `10y_bond` olur. Oran alınamazsa değer `null` ve kaynak `unavailable` döner; Sharpe, Sortino ve Alfa hesaplanmaz.
+* Yıllıklandırma 252 işlem günü varsayımı yerine gözlenen takvim aralığına göre yapılır.
+* Analiz veya dengeleme sırasında beklenmeyen bir hata oluşursa **HTTP 500** ve açıklayıcı `detail` döndürülür.
 
 ---
 

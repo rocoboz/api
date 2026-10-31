@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from typing import List, Optional, Dict
-from fastapi import APIRouter, Request, Response
+import logging
+from datetime import date
+from typing import Dict, List, Literal, Optional
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from api_core.services.normalizers import clean_json_val, compact_payload, df_to_json
@@ -10,14 +12,17 @@ from api_core.services.security import limiter
 from finans_core import Portfolio
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+logger = logging.getLogger("finansapi.portfolio")
 
 
 class HoldingItem(BaseModel):
     symbol: str = Field(..., description="Asset symbol (e.g. THYAO, USD, gram-altin, YAY)")
     shares: float = Field(..., description="Number of shares/units owned")
     cost: Optional[float] = Field(None, description="Purchase cost per share/unit. If None, uses current price")
-    asset_type: Optional[str] = Field(None, description="Asset type override: stock, fx, crypto, fund. Auto-detected if None")
-    purchase_date: Optional[str] = Field(None, description="Purchase date in YYYY-MM-DD format. Defaults to today if None")
+    asset_type: Optional[Literal["stock", "fx", "crypto", "fund"]] = Field(
+        None, description="Asset type override: stock, fx, crypto, fund. Auto-detected if None"
+    )
+    purchase_date: Optional[date] = Field(None, description="Purchase date in YYYY-MM-DD format. If None, the asset is assumed held for the full history")
 
 
 class PortfolioAnalysisRequest(BaseModel):
@@ -70,8 +75,13 @@ def analyze_portfolio(request: Request, response: Response, req: PortfolioAnalys
             "risk_metrics": cleaned_metrics,
         }
         return compact_payload(payload)
+    except HTTPException:
+        raise
     except Exception as exc:
-        return {"error": f"Portfolio analysis failed: {exc}"}
+        logger.exception("Portfolio analysis failed")
+        raise HTTPException(
+            status_code=500, detail=f"Portfolio analysis failed: {exc}"
+        ) from exc
 
 
 @router.post("/rebalance")
@@ -98,5 +108,10 @@ def rebalance_portfolio(request: Request, response: Response, req: PortfolioReba
             "rebalance_plan": df_to_json(plan_df),
         }
         return compact_payload(payload)
+    except HTTPException:
+        raise
     except Exception as exc:
-        return {"error": f"Portfolio rebalancing calculation failed: {exc}"}
+        logger.exception("Portfolio rebalancing calculation failed")
+        raise HTTPException(
+            status_code=500, detail=f"Portfolio rebalancing calculation failed: {exc}"
+        ) from exc
